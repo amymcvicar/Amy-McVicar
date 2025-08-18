@@ -1,0 +1,376 @@
+---
+title: "History Mystery - Classification"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Determining authorship of the Federalist Papers is a common case used for teaching data mining and as such this report intends to evaluate who is the author of the disputed Federalist Papers where authorship is not clear using classification and decision tree modeling.
+
+
+The assigment instructions from Syracuse University Data Analytics course included the following background:
+
+Quote from the Library of Congress
+http://www.loc.gov/rr/program/bib/ourdocs/federalist.html
+
+The Federalist Papers were a series of eighty-five essays urging the citizens of New York to ratify the new United States Constitution. Written by Alexander Hamilton, James Madison, and John Jay, the essays originally appeared anonymously in New York newspapers in 1787 and 1788 under the pen name "Publius." A bound edition of the essays was first published in 1788, but it was not until the 1818 edition published by the printer Jacob Gideon that the authors of each essay were identified by name. The Federalist Papers are considered one of the most important sources for interpreting and understanding the original intent of the Constitution.
+
+The following background was also provided with the assignment:
+
+These are the famous essays with disputed authorship. Hamilton wrote to claim the authorship before he was killed in a duel. Later Madison also claimed authorship. Historians were trying to find out which one was the real author.
+
+## Analysis and Models
+
+## About the Data
+
+85 essays were provided for this report. 
+
+The set of 85 essay files included the following:
+
+51 by Hamilton
+23 by Madison
+11 essays, labeled as being authored by “Hamilton or Madison”, are the disputed essays that are the goal of this report. 
+
+## Getting the Data
+
+The files were provided in a folder and in cvs (text) format. The files were uploaded to R in Corpus format to be conducive to text analysis.
+
+DELETE FOLLOWING FROM REPORT:
+```{r importing, include=FALSE}
+###Load Fed Papers Corpus
+library(NLP)
+library(tm)
+library(corpus)
+FedPapersCorpus <- Corpus(DirSource("FedPapersCorpus"))
+(numberFedPapers<-length(FedPapersCorpus))
+
+##The following will show you that you read in all the documents
+(summary(FedPapersCorpus))
+##The following will show you the meta data
+(meta(FedPapersCorpus[[1]]))
+(meta(FedPapersCorpus[[1]],5))
+
+```
+
+
+## Data Cleaning
+
+Next, the text was cleaned using the following steps:
+
+Remove Numbers
+Remove Punctuations
+Remove <1% Words
+Remove Very Common Words (Stop Words)
+
+DELETE THIS FROM REPORT:
+```{r cleaning, include=FALSE}
+
+##Data Preparation and Transformation on Fed Papers
+###Remove punctuation, numbers, and space
+(getTransformations())
+(nFedPapersCorpus <- length(FedPapersCorpus))
+
+
+### ignore extremely rare words i.e. terms that appear in less then 1% of the documents
+(minTermFreq <- nFedPapersCorpus * 0.0001)
+
+
+###Ignore overly common words i.e. terms that appear in more than 50% of the documents
+(maxTermFreq <- nFedPapersCorpus * 1)
+
+###Stop Words
+(MyStopwords <- c("will","one","two", "may","less", "well","might","withou","small", "single", "several", "but", "very", "can", "must", "also", "any", "and", "are", "however", "into", "almost", "can", "for", "add", "publius", "Madison", "Alexand", "Alexander", "James", "Hamilton", "Jay", "well", "might", "without", "Author" ))
+
+(STOPS <- stopwords('english'))
+
+Papers_DTM <- DocumentTermMatrix(FedPapersCorpus,
+control = list(
+stopwords = TRUE,
+wordLengths = c(3, 15),
+removePunctuation = T,
+removeNumbers = T,
+tolower = T,
+stemming = T,
+remove_separators = T,
+stopwords = MyStopwords,
+#removeWords(STOPS), # use the "built-in" STOP words
+bounds = list(global = c(minTermFreq, maxTermFreq))
+))
+#inspect FedPapers Document Term Matrix (DTM)
+DTM <- as.matrix(Papers_DTM)
+(DTM[1:11,1:10])
+  
+  
+
+```
+## Cleaning Results
+
+After cleaning the data, we can do some high level data exploration.
+
+First, we can confirm how many words are left to work with:
+
+```{r clean1, echo=FALSE}
+WordFreq <- colSums(as.matrix(Papers_DTM))
+(length(WordFreq))
+
+```
+
+Next, we prepare the data for analysis thru vectorization and do some high level data exploration.
+
+```{r clean2, echo=FALSE}
+
+##Look at word freuquncies
+WordFreq <- colSums(as.matrix(Papers_DTM))
+(head(WordFreq))
+
+
+(length(WordFreq))
+
+ord <- order(WordFreq)
+(WordFreq[head(ord)])
+
+
+
+(Row_Sum_Per_doc <- rowSums((as.matrix(Papers_DTM))))
+```
+
+Next, we can look at the top six words with the highest frequencies:
+
+```{r clean3, echo=FALSE}
+(WordFreq[tail(ord)])
+```
+
+##Normalization
+
+After cleaning the data, the data was further prepared with additional normalization.
+
+```{r normalization1, echo=FALSE}
+library(tidyverse)
+## Create a normalized version of Papers_DTM
+## Create a normalized version of Papers_DTM
+Papers_M <- as.matrix(Papers_DTM)
+Papers_M_N1 <- apply(Papers_M, 1, function(i) round(i/sum(i),3))
+Papers_Matrix_Norm <- t(Papers_M_N1)
+## Convert to matrix and view
+Papers_dtm_matrix = as.matrix(Papers_DTM)
+#str(Papers_dtm_matrix)
+#(Papers_dtm_matrix[c(1:11),c(2:10)])
+## Have a look at the original and the norm to make sure
+##(Papers_M[c(1:11),c(1000:1010)])
+## From the line of code
+## (Row_Sum_Per_doc <- rowSums((as.matrix(FedPapersDTM))))
+## above, we can see that dispt_fed_53.txt has a row sum of 1035
+## So, we can confirm correctness. For word "curious" we should have
+## 1/1035 = 0.001 rounded, which is what we have.
+## Also convert to DF
+Papers_DF <- as.data.frame(as.matrix(Papers_Matrix_Norm))
+Papers_DF1 <- rownames_to_column(Papers_DF)
+```
+
+##Add Labels
+
+Matrix and DF versions of the data were created in preparation for different types of analysis:
+
+```{r organization1, echo=FALSE}
+
+## Warning: Deprecated, use tibble::rownames_to_column() instead.
+names(Papers_DF1)[1]<-"Author"
+Papers_DF1[1:11,1]="dispt"
+Papers_DF1[12:62,1]="hamil"
+Papers_DF1[63:85,1]="madis"
+Papers_DF2 <- Papers_DF1[12:85,]
+Papers_DF3 <- Papers_DF1[1:11,]
+head(Papers_DF1)
+```
+
+##Exporatory Data Analysis
+
+WordClouds are an interesting word data exploration technique for text. Below are the wordclouds and top 50 word counts for the following essay segments:
+
+Disputed
+Hamilton
+Madison
+
+##Disputed
+
+WordCloud for the top fifty (50) words in the disputed essays:
+
+```{r wordcloud1, echo=FALSE}
+library(wordcloud)
+library("SnowballC")
+library("RColorBrewer")
+#Wordcloud Visualization Hamilton, Madison and Disputed Papers
+#Wordcloud Visualization Hamilton, Madison and Disputed Papers
+dist <- Papers_DF1[1:11,]
+hamil <- Papers_DF1[12:62,]
+madis <- Papers_DF1[63:85,]
+
+
+DisputedPapersWC <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[11, ], min.freq = 5,
+          max.words = 50, random.order = FALSE, rot.per = 0.35, 
+          colors = brewer.pal(8, "Dark2"))
+
+```
+
+The top 50 words by count in the disputed essays:
+
+```{r wordcount1, echo=FALSE}
+
+(head(sort(as.matrix(Papers_DTM)[11,], decreasing = TRUE), n=50))
+
+
+```
+
+##Hamilton vs. Madison
+
+WordCloud comparison for the top fifty (50) words in the Hamilton and Madison essays:
+
+```{r wordcloud2, echo=FALSE}
+
+#Wordcloud Visualization Hamilton and Madison
+HamiltonPapersWC <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[12:62, ], main = "Hamilton")
+
+MadisonPapersHW <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[63:77, ], main = "Madison")
+```
+
+## Results
+
+
+##Experimental Design
+
+Next, data is randomly selected to create train and test data sets.
+
+The train to test ratio for data is set to 60%.
+
+```{r dataset1, echo=FALSE}
+##Make Train and Test sets
+trainRatio <- .60
+set.seed(11) # Set Seed so that same sample can be reproduced in future also
+sample <- sample.int(n = nrow(Papers_DF1), size = floor(trainRatio*nrow(Papers_DF1)), replace = FALSE)
+train <- Papers_DF1[sample, ]
+test <- Papers_DF1[-sample, ]
+# train / test ratio
+length(sample)/nrow(Papers_DF1)
+```
+
+##Models
+
+##Decision Tree Model #1
+
+```{r traintreemodel1, echo=FALSE}
+##Decision Tree Models
+#Train Tree Model 1
+library(rpart)
+train_tree1 <- rpart(Author ~ ., data = train, method="class", control=rpart.control(cp=0))
+summary(train_tree1)
+```
+##Decision Tree Model #1 Prediction
+
+```{r predictionmodel1, echo=FALSE}
+#predict the test dataset using the model for train tree No. 1
+predicted1= predict(train_tree1, test, type="class")
+#plot number of splits
+rsq.rpart(train_tree1)
+```
+##Decision Tree Model #1 Plot
+
+```{r plotmodel1, echo=FALSE}
+library(rpart.plot)
+library(rattle)
+plotcp(train_tree1)
+#plot the decision tree
+fancyRpartPlot(train_tree1)
+
+
+```
+
+##Decision Tree Model #1 Confusion Matrix
+
+```{r confusion1, echo=FALSE}
+#confusion matrix to find correct and incorrect predictions
+table(Authorship=predicted1, true=test$Author)
+```
+
+
+
+##Decision Tree Model #2 
+
+In model 2, the data is divided by author and a dataset that only contains papers with determined authors of Madison or Hamilton is used.
+
+```{r dataset2, echo=FALSE}
+
+##Make Train and Test sets
+trainRatio <- .60
+set.seed(11) # Set Seed so that same sample can be reproduced in future also
+sample <- sample.int(n = nrow(Papers_DF2), size = floor(trainRatio*nrow(Papers_DF2)), replace = FALSE)
+train <- Papers_DF2[sample, ]
+test <- Papers_DF2[-sample, ]
+# train / test ratio
+length(sample)/nrow(Papers_DF2)
+```
+
+#Train Tree Model 2
+
+```{r traintree2, echo=FALSE}
+
+##Make Train and Test sets
+train_tree2 <- rpart(Author ~ ., data = train, method = "class", control=rpart.control(cp=0, minsplit = 2, maxdepth = 5)) 
+summary(train_tree2)
+```
+
+
+##Decision Tree Model #2 Plot
+
+```{r plotmodel2, echo=FALSE}
+plotcp(train_tree2)
+#plot the decision tree
+fancyRpartPlot(train_tree2)
+```
+
+##Predict Model # 2 with Test Data
+
+```{r predictmodel2, echo=FALSE}
+#predict the test dataset using the model for train tree No. 2
+predicted2= predict(train_tree2, test, type="class")
+#plot number of splits
+rsq.rpart(train_tree2)
+```
+
+##Decision Tree Model #2 Confusion Matrix
+
+```{r condusion2, echo=FALSE}
+#confusion matrix to find correct and incorrect predictions
+table(Authorship=predicted2, true=test$Author)
+```
+
+##Predict Model # 2 with Disputed Authorship Data
+
+```{r predictmodel3, echo=FALSE}
+#predict the test dataset using the model for train tree No. 2
+predicted3= predict(train_tree2, Papers_DF3, type="class")
+
+```
+
+##Decision Tree Model #2 Disputed Prediction Matrix
+
+```{r condusion3, echo=FALSE}
+#confusion matrix to find correct and incorrect predictions
+table(Authorship=predicted3, true=Papers_DF3$Author)
+```
+
+
+## Conclusion
+
+
+
+
+
+
+
+
+
+

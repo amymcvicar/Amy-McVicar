@@ -1,0 +1,339 @@
+---
+title: "History Mysterey"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Determining authorship of the Federalist Papers is a common case used for teaching data mining and as such this report intends to evaluate who is the author of the disputed Federalist Papers where authorship is not clear.
+
+
+The assigment instructions from Syracuse University Data Analytics course included the following background:
+
+Quote from the Library of Congress
+http://www.loc.gov/rr/program/bib/ourdocs/federalist.html
+
+The Federalist Papers were a series of eighty-five essays urging the citizens of New York to ratify the new United States Constitution. Written by Alexander Hamilton, James Madison, and John Jay, the essays originally appeared anonymously in New York newspapers in 1787 and 1788 under the pen name "Publius." A bound edition of the essays was first published in 1788, but it was not until the 1818 edition published by the printer Jacob Gideon that the authors of each essay were identified by name. The Federalist Papers are considered one of the most important sources for interpreting and understanding the original intent of the Constitution.
+
+The following background was also provided with the assignment:
+
+These are the famous essays with disputed authorship. Hamilton wrote to claim the authorship before he was killed in a duel. Later Madison also claimed authorship. Historians were trying to find out which one was the real author.
+
+## Approach
+
+This report will analyse the Federalist Papers using the clustering algorithms k-Means, EM, and HAC.
+
+## Analysis and Models
+
+## About the Data
+
+85 essays were provided for this report. 
+
+The set of 85 essay files included the following:
+
+51 by Hamilton
+15 by Madison
+3  by Hamilton and Madison
+5  by Jay
+
+11 essays, labeled as being authored by “Hamilton or Madison”, are the disputed essays that are the goal of this report. 
+
+## Getting the Data
+
+The files were provided in a folder and in cvs (text) format. The files were uploaded to R in Corpus format to be conducive to text analysis.
+
+DELETE FOLLOWING FROM REPORT:
+```{r importing, include=FALSE}
+###Load Fed Papers Corpus
+library(NLP)
+library(tm)
+library(corpus)
+FedPapersCorpus <- Corpus(DirSource("FedPapersCorpus"))
+(numberFedPapers<-length(FedPapersCorpus))
+
+##The following will show you that you read in all the documents
+(summary(FedPapersCorpus))
+##The following will show you the meta data
+(meta(FedPapersCorpus[[1]]))
+(meta(FedPapersCorpus[[1]],5))
+
+```
+
+
+## Data Cleaning
+
+Next, the text was cleaned using the following steps:
+
+Remove Numbers
+Remove Punctuations
+Remove <1% Words
+Remove Very Common Words (Stop Words)
+
+DELETE THIS FROM REPORT:
+```{r cleaning, include=FALSE}
+
+##Data Preparation and Transformation on Fed Papers
+###Remove punctuation, numbers, and space
+(getTransformations())
+(nFedPapersCorpus <- length(FedPapersCorpus))
+
+### ignore extremely rare words i.e. terms that appear in less then 1% of the documents
+(minTermFreq <- nFedPapersCorpus * 0.0001)
+
+###Ignore overly common words i.e. terms that appear in more than 50% of the documents
+(maxTermFreq <- nFedPapersCorpus * 1)
+
+###Stop Words
+(MyStopwords <- c("will","one","two", "may","less", "well","might","withou","small", "single", "several", "but", "very", "can", "must", "also", "any", "and", "are", "however", "into", "almost", "can", "for", "add"))
+
+(STOPS <- stopwords('english'))
+
+Papers_DTM <- DocumentTermMatrix(FedPapersCorpus,
+control = list(
+stopwords = TRUE,
+wordLengths = c(3, 15),
+removePunctuation = T,
+removeNumbers = T,
+tolower = T,
+stemming = T,
+remove_separators = T,
+stopwords = MyStopwords,
+#removeWords(STOPS), # use the "built-in" STOP words
+bounds = list(global = c(minTermFreq, maxTermFreq))
+))
+#inspect FedPapers Document Term Matrix (DTM)
+DTM <- as.matrix(Papers_DTM)
+(DTM[1:11,1:10])
+  
+  
+
+```
+## Cleaning Results
+
+After cleaning the data, we can do some high level data exploration.
+
+First, we can confirm how many words are left to work with:
+
+```{r clean1, echo=FALSE}
+WordFreq <- colSums(as.matrix(Papers_DTM))
+(length(WordFreq))
+
+```
+
+Next, we look at the the first six words with the lowest frequencies:
+
+```{r clean2, echo=FALSE}
+
+ord <- order(WordFreq)
+(WordFreq[head(ord)])
+```
+
+Next, we can look at the top six words with the highest frequencies:
+
+```{r clean3, echo=FALSE}
+(WordFreq[tail(ord)])
+```
+
+##Normalization
+
+After cleaning the data, the data was further prepared with additional normalization.
+
+```{r normalization1, echo=FALSE}
+## Create a normalized version of Papers_DTM
+Papers_M <- as.matrix(Papers_DTM)
+Papers_M_N1 <- apply(Papers_M, 1, function(i) round(i/sum(i),3))
+Papers_Matrix_Norm <- t(Papers_M_N1)
+## Have a look at the original and the norm to make sure
+##(Papers_M[c(1:11),c(1000:1010)])
+## From the line of code
+## (Row_Sum_Per_doc <- rowSums((as.matrix(FedPapersDTM))))
+## above, we can see that dispt_fed_53.txt has a row sum of 1035
+## So, we can confirm correctness. For word "curious" we should have
+## 1/1035 = 0.001 rounded, which is what we have.
+```
+
+##Organization
+
+Matrix and DF versions of the data were created in preparation for different types of analysis:
+
+```{r organization1, echo=FALSE}
+Papers_dtm_matrix = as.matrix(Papers_DTM)
+##str(Papers_dtm_matrix)
+##(Papers_dtm_matrix[c(1:11),c(2:10)])
+Papers_DF <- as.data.frame(as.matrix(Papers_DTM))
+##str(Papers_DF)
+
+```
+
+##Exporatory Data Analysis
+
+WordClouds are an interesting word data exploration technique for text. Below are the wordclouds and top 50 word counts for the following essay segments:
+
+Disputed
+Hamilton
+Madison
+
+##Disputed
+
+WordCloud for the top fifty (50) words in the disputed essays:
+
+```{r wordcloud1, echo=FALSE}
+library(wordcloud)
+library("SnowballC")
+library("RColorBrewer")
+#Wordcloud Visualization Hamilton, Madison and Disputed Papers
+DisputedPapersWC <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[11, ], min.freq = 5,
+          max.words = 50, random.order = FALSE, rot.per = 0.35, 
+          colors = brewer.pal(8, "Dark2"))
+
+```
+
+The top 50 words by count in the disputed essays:
+
+```{r wordcount1, echo=FALSE}
+
+(head(sort(as.matrix(Papers_DTM)[11,], decreasing = TRUE), n=50))
+
+
+```
+
+##Hamilton vs. Madison
+
+WordCloud comparison for the top fifty (50) words in the Hamilton and Madison essays:
+
+```{r wordcloud2, echo=FALSE}
+
+#Wordcloud Visualization Hamilton and Madison
+HamiltonPapersWC <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[12:62, ], main = "Hamilton")
+
+MadisonPapersHW <- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[63:77, ], main = "Madison")
+```
+
+## Results
+
+Distance measurements of Manhattan, Euclidean, and Cosine were used.
+
+Manhattan distance is named after counting number of blocks need to travel to go from point A to point B in Manhattan. It counts the distance you need to move in each dimension to get between points. It works well for binary data or data with limited number of dimensions.
+
+Euclidean measures the straight line between two datapoints and works well with data with a medium amount of dimensions. Between 9 and 10 dimensions issues begin to arise.
+
+Cosine measures a little differently is measures the similarity between data points by measuring the angle between them. Cosine is well suited for data sets with many dimensions.
+
+As noted in the provided code for this homework, "Cosine similarity works the best. Norm and not norm is about the same because the size of the Papers are not sig diff."
+
+```{r model1, echo=FALSE}
+library(lsa)
+library(proxy)
+###Distance Measure
+m <- Papers_dtm_matrix
+m_norm <- Papers_Matrix_Norm
+#m <- [1:2, 1:3]
+distMatrix_E <- dist(m, method = "euclidean")
+#print(distMatrix_E)
+distMatrix_M <- dist(m, method  = "manhattan")
+#print(distMatrix_M)
+distMatrix_C <- dist(m, method = "cosine")
+print(distMatrix_C)
+distMatrix_C_norm <- dist(m_norm, method = "cosine")
+#print(distMatrix_C_norm)
+##Cosine similarity works the best. Norm and not norm is about
+## the same because the size of the Papers are not sig diff.
+```
+
+
+##HAC Clusterring
+
+HAC Clusterring uses a hieararchal approach.
+
+
+```{r HAC_Clustering, echo=FALSE}
+## HAC: Hierarchical Algorithm Clustering Method
+## Euclidean
+groups_E <- hclust(distMatrix_E,method = "ward.D")
+plot(groups_E, cex = 0.5, font  =22, hang=-1, main = "HAC Cluster Dendrogram with Euclidean Similarity")
+rect.hclust(groups_E, k = 2)
+
+```
+
+
+```{r Cosine_Similarity_1, echo=FALSE}
+## Cosine Similarity
+groups_C <- hclust(distMatrix_C,method="ward.D")
+plot(groups_C, cex=0.5,font=22, hang=-1,main = "HAC Cluster Dendrogram with Cosine Similarity")
+rect.hclust(groups_C, k=8)
+```
+
+
+```{r Cosine_Similarity_2, echo=FALSE}
+## Cosine Similarity for Normalized Matrix
+groups_C_n <- hclust(distMatrix_C_norm,method="ward.D")
+
+plot(groups_C_n, cex=0.5,font=22, hang=-1,main = "HAC Cluster Dendrogram with Cosine Similarity Normalized")
+rect.hclust(groups_C_n, k=8)
+```
+##K-Means
+
+K-means use an unsurprivised algorithm to group data into clusters based on distance between multiple variables.
+
+##K-Means Clusterring with 2 Centers
+```{r Kmeans_1, echo=FALSE}
+## K-means
+X <- m_norm
+k2 <- kmeans(X, centers = 2, nstart = 100, iter.max = 50)
+str(k2)
+```
+##K-Means Clusttering with 8 Centers
+
+```{r Kmeans_2, echo=FALSE}
+k3 <- kmeans(X, centers = 8, nstart = 50, iter.max= 50)
+str(k3)
+```
+
+##K-means Visualization
+
+K-Means & Manahattan
+```{r Kmeans_m, echo=FALSE}
+library(factoextra)
+distance1 <- get_dist(X,method = "manhattan")
+fviz_dist(distance1, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+K-Means & Euclidean
+
+```{r Kmeans_e, echo=FALSE}
+
+distance2 <- get_dist(X,method = "euclidean")
+fviz_dist(distance2, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+## EM
+
+EM or Expectation Maximization clustering algorithm uses the following technique per wikibooks (https://en.wikibooks.org/wiki/Data_Mining_Algorithms_In_R/Clustering/Expectation_Maximization_(EM)):
+
+'The EM algorithm is an unsupervised clustering method, that is, doesn't require a training phase, based on mixture models. It follows an iterative approach, sub-optimal, which tries to find the parameters of the probability distribution that has the maximum likelihood of its attributes.
+
+In general lines, the algorithm's input are the data set (x), the total number of clusters (M), the accepted error to converge (e) and the maximum number of iterations. For each iteration, first is executed the E-Step (Expectation), that estimates the probability of each point belonging to each cluster, followed by the M-step (Maximization), that re-estimate the parameter vector of the probability distribution of each class. The algorithm finishes when the distribution parameters converges or reach the maximum number of iterations."
+
+According to the R EMCluster package documentation (https://cran.r-project.org/web/packages/EMCluster/EMCluster.pdf), the title is 'EM Algorithm for Model-Based Clustering of Finite Mixture' and contains 'EM algorithms and several efficient initialization methods for model-based clustering of finite
+mixture Gaussian distribution with unstructured dispersion
+in both of unsupervised and semi-supervised learning.'
+
+
+## Conclusion
+
+The HAC algorithm provided the most understandable results. The Cosine distance measurement provided the closest distance measurements. 
+
+Analyzing the results of the HAC clustering using cosine distance for 8 clusters and the higher hieararchal level of only two clusters shows the same results which should give an additional level of confidence to the analysis.
+
+The results appear to be that Hamilton wrote more of the disputed essays based on numbers, but a granular look shows that it is likely that Madison also wrote some of the essays. Further analysis to determine the likely author at the singular level of each essay is warranted. Otherwise, one could say Hamilton likely wrote most of them, but not all of them.
+
+
+
+
+
+
+
+
