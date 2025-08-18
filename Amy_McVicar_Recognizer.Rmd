@@ -1,0 +1,605 @@
+---
+title: "Report Template"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sqldf) 
+library(ggplot2) 
+library(class) 
+library(e1071) 
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(lattice)
+library(caret)
+```
+
+## Introduction
+
+The following report regards using multiple models in preparation for the Kaggle's Digit Recognizer competition, which can be found here >> https://www.kaggle.com/c/digit-recognizer/data
+
+Kaggle provides a file of gray-scale images of hand-drawn digits, from zero through nine in both a training and testing set. The competition is in submitting sample files to Kaggle to achieve the highest prediction accuracy rate. The goal of this report is to use multiple methods, demonstrating tuning and model evaluation in order to create a sample to submit to Kaggle.
+
+The following models are to be used:
+
+*Decision tree
+*Naïve Bayes
+*kNN
+*SVM
+*Random Forest
+
+## Analysis and Models
+
+The data provided by Kaggle is in both a train and test file. The train file contains labels while the test file does not. The files contain 785 and 784 columns respectively. Each has 42,000 records. The columns each represent a pixel and it's grayscale representative number for the image that the row represents and describes.
+
+## Getting the Data
+
+The data is first downloaded from Kaggle (https://www.kaggle.com/c/digit-recognizer/data) 
+and then loaded into R. The 42,000 row and 785 column counts are confirmed.
+```{r importing, include=TRUE}
+#First load the training data in csv format, and then convert "label" to nominal variable.
+filename <-"digit_train.csv"
+DigitTotalDF <- read.csv(filename, header = TRUE, stringsAsFactors = TRUE)
+DigitTotalDF$label<-as.factor(DigitTotalDF$label)
+dim(DigitTotalDF)
+
+```
+
+Next, we view the head of the file to confirm the contents.
+
+```{r dataview, include=TRUE}
+head(DigitTotalDF)
+```
+## Data Preparation
+
+Next, a sample data set is created from a random twenty five percent (25%) selection from the entire data set, static variables are set, a hold out data set is created, a funcion for model evaluation is created, and a binarized version fo the test and train datasets was created.
+
+```{r percent, include=TRUE}
+#Create a random sample of n% of train data set
+percent <- .25
+set.seed(275)
+DigitSplit <- sample(nrow(DigitTotalDF),nrow(DigitTotalDF)*percent)
+DigitDF <- DigitTotalDF[DigitSplit,]
+dim(DigitDF)
+trainset <- DigitDF
+
+# Setting static variables used throughout the Models section
+N <- nrow(trainset)
+kfolds <- 3
+set.seed(30)
+holdout <- split(sample(1:N), 1:kfolds)
+
+# Function for model evaluation
+get_accuracy_rate <- function(results_table, total_cases) {
+    diagonal_sum <- sum(c(results_table[[1]], results_table[[12]], results_table[[23]], results_table[[34]],
+                        results_table[[45]], results_table[[56]], results_table[[67]], results_table[[78]],
+                        results_table[[89]], results_table[[100]]))
+  (diagonal_sum / total_cases)*100
+}
+
+# Discretizing at 87%
+binarized_trainset <- trainset
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    binarized_trainset[, c(col)] <- ifelse(binarized_trainset[, c(col)] > 131, 1, 0)
+  }
+}
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    binarized_trainset[, c(col)] <- as.factor(binarized_trainset[, c(col)])
+  }
+}
+```
+
+## Exploratory Data Analysis & Visualization
+
+Next, visualizations of the trainset of data created in data preparation is done to evaluate and familiarize with the data set used in models going forward.
+
+```{r eda, echo=TRUE}
+
+digit_freq <- sqldf("SELECT label, COUNT(label) as count
+                     FROM trainset
+                     GROUP BY label")
+ggplot(digit_freq, aes(x=reorder(label, -count), y=count)) + geom_bar(stat="identity") + xlab("Written Digit") + ylab("Frequency Count") + ggtitle("Written Digit by Frequency Count")
+
+zero <- 0
+fifty <- 0
+one_hundred <- 0
+one_hundred_fifty <- 0
+two_hundred <- 0
+two_hundred_fifty_five <- 0
+for (col in colnames(trainset)) {
+  if (col != "label") {
+    #binarized_trainset[,c(col)] <- ifelse(binarized_trainset[,c(col)] > 131, 1, 0)
+    ifelse(trainset[,c(col)] == 0, zero <- zero + 1, ifelse(
+      trainset[,c(col)] < 51, fifty <- fifty + 1, ifelse(
+        trainset[,c(col)] < 101, one_hundred <- one_hundred + 1, ifelse(
+          trainset[,c(col)] < 151, one_hundred_fifty <- one_hundred_fifty + 1, ifelse(
+            trainset[,c(col)] < 201, two_hundred <- two_hundred + 1, two_hundred_fifty_five + 1
+          )
+        )
+      )
+    )
+  )
+  }
+}
+
+color_bins <- data.frame("color_bin"=c("0", "50", "100", "150", "200", "255"),
+                         "count"=c(zero, fifty, one_hundred, one_hundred_fifty, two_hundred, two_hundred_fifty_five))
+ggplot(color_bins, aes(x=reorder(color_bin, -count), y=count)) + geom_bar(stat="identity") + xlab("Color Bin") + ylab("Frequency Count") + ggtitle("Color Bin by Frequency Count")
+
+color_freq <- data.frame("0"=c(), "1"=c())
+for (col in colnames(binarized_trainset)) {
+  if (col != "label") {
+    zero <- c(length(which(binarized_trainset[,c(col)] == 0)))
+    one <- c(length(which(binarized_trainset[,c(col)] == 1)))
+    color_freq <- rbind(color_freq, data.frame("0"=zero, "1"=one))
+  }
+}
+colnames(color_freq) <- c("zero", "one")
+color_freq <- data.frame("number"=c("zero", "one"), "count"=c(sum(color_freq$zero), sum(color_freq$one)))
+
+ggplot(color_freq, aes(x=number, y=count)) + geom_bar(stat="identity") + xlab("Color Number") + ylab("Count") + ggtitle("Color Number by Count")
+
+
+
+
+```
+
+##Models
+
+## Decision Trees
+
+First, for decision tree modelling, the trainset is split into a train set of sixty percent (60%) and test set of forty percent (40%).
+
+```{r dataset1, include=FALSE, echo=FALSE}
+##Make Train and Test sets
+trainRatio <- .60
+set.seed(11) # Set Seed so that same sample can be reproduced in future also
+sample <- sample.int(n = nrow(trainset), size = floor(trainRatio*nrow(trainset)), replace = FALSE)
+train <- trainset[sample, ]
+test <- trainset[-sample, ]
+# train / test ratio
+length(sample)/nrow(trainset)
+
+```
+
+A desion tree model is created with a cp of .02. After numerous updates to the parameter .02 was chosen as the most appropriate and best results with this data set.
+
+```{r traintreemodel1, echo=TRUE}
+#DecisionTree Model
+train_tree1 <- rpart(label ~ ., data = train, method="class", control=rpart.control(cp=.02))
+#summary(train_tree1)
+```
+##Decision Tree Model Prediction
+
+Next, the test segment is used with the decision tree model to
+to create a prediction file that can then be tested for accuracy.
+
+```{r predictionmodel1, echo=FALSE}
+#predict the test dataset using the model for train tree No. 1
+predicted1 = predict(train_tree1, test, type="class")
+#plot number of splits
+rsq.rpart(train_tree1)
+```
+
+
+```{r plotmodel1, echo=FALSE}
+
+plotcp(train_tree1)
+#plot the decision tree
+fancyRpartPlot(train_tree1)
+
+
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r dtconfmat, echo=FALSE, include = TRUE}
+#confusion matrix to find correct and incorrect predictions
+
+df <- data.frame(predicted1)
+confusionMatrix(df$predicted1, test$label)
+
+ 
+```
+
+
+## Naive Bayes
+
+Next the train set is used with Naive Bayes.
+
+```{r naivebayes, echo=TRUE,include=FALSE}
+
+## Make sure you take the labels out of the testing data
+
+test_noLabel <- test[-c(1)]
+
+  
+#### Naive Bayes prediction ussing e1071 package
+#Naive Bayes Train model
+train_naibayes<-naiveBayes(label~., data=train, na.action = na.pass)
+#train_naibayes
+summary(train_naibayes)
+
+#Naive Bayes model Prediction 
+nb_Pred <- predict(train_naibayes, test_noLabel)
+#nb_Pred
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r naivebayesconfmat, echo=FALSE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+dfnb <- data.frame(nb_Pred)
+confusionMatrix(nb_Pred, test$label)
+```
+##Naive Bayes 3 K-fold
+
+The Naive Bayes model is adjusted to use 3 K-fold validation.
+
+```{r naivebayes3k, echo=TRUE,include=TRUE}
+#Run training and Testing for each of the k-folds
+
+all_results <- data.frame(orig = c(), pred =c ())
+
+for (k in 1:kfolds){
+DigitDF_Test <- DigitDF[holdout[[k]], ]
+DigitDF_Train=DigitDF[-holdout[[k]], ]
+## View the created Test and Train sets
+(head(DigitDF_Train))
+(table(DigitDF_Test$Label))
+## Make sure you take the labels out of the testing data
+(head(DigitDF_Test))
+DigitDF_Test_noLabel<-DigitDF_Test[-c(1)]
+DigitDF_Test_justLabel<-DigitDF_Test$label
+(head(DigitDF_Test_noLabel))
+  
+#### Naive Bayes prediction ussing e1071 package
+#Naive Bayes Train model
+train_naibayes<-naiveBayes(label~., data=DigitDF_Train, na.action = na.pass)
+#train_naibayes
+#summary(train_naibayes)
+
+#Naive Bayes model Prediction 
+nb_Pred <- predict(train_naibayes, DigitDF_Test_noLabel)
+#nb_Pred
+
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+(confusionMatrix(nb_Pred, DigitDF_Test$label))
+
+# Accumulate results from each fold, if you like
+all_results <- rbind(all_results, data.frame(orig=DigitDF_Test_justLabel, pred=nb_Pred))
+ 
+##Visualize
+plot(nb_Pred, ylab = "Density", main = "Naive Bayes Plot")
+
+}
+
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r naivebayesk3confmat, echo=FALSE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+  
+##kNN
+
+A kNN model is created using 7 as the k guess parameter.
+
+```{r knn, echo=TRUE, include = TRUE}
+k_guess = 7# round(sqrt(nrow(trainset)))
+all_results <- data.frame(orig = c(), pred =c ())
+for (k in 1:kfolds) {
+  new_test <- trainset[holdout[[k]], ]
+  new_train <- trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  pred <- knn(train=new_train, test=new_test, cl=new_train$label, k=k_guess, prob=FALSE)
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+
+table(all_results$orig, all_results$pred)
+
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+
+```{r knnconfmat, echo=TRUE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+##SVM
+
+A SVM model is created.
+
+```{r svm1,   echo=TRUE, message=FALSE, warning=FALSE}
+cols_to_remove = c() 
+for (col in colnames(trainset)) { 
+  if (col != "label") { 
+    if (length(unique(trainset[, c(col)])) == 1) {   cols_to_remove <- c(cols_to_remove, col) 
+    } 
+    } 
+  } 
+
+svm_trainset <- trainset[-which(colnames(trainset) %in% cols_to_remove)]
+
+
+# Baseline SVM - no changes to data
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- svm_trainset[holdout[[k]], ]
+  new_train <- svm_trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- svm(label ~ ., new_train, na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+
+#table(all_results$orig, all_results$pred)
+#get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+
+
+
+```
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r svbconfmat, echo=FALSE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+##SVM Binarized Data
+
+The same SVM model is run, but using a binarized data set. 
+
+```{r svmb,  echo=TRUE, message=FALSE, warning=FALSE}
+
+cols_to_remove = c() 
+for (col in colnames(binarized_trainset)) { 
+if (col != "label") { 
+if (length(unique(binarized_trainset[, c(col)])) == 1) { cols_to_remove <- c(cols_to_remove, col) 
+} 
+} 
+}
+
+binarized_trainset <- binarized_trainset[-which(colnames(binarized_trainset) %in% cols_to_remove)]
+
+all_results <- data.frame(orig=c(), pred=c()) 
+
+for (k in 1:kfolds) { 
+  new_test <- binarized_trainset[holdout[[k]], ] 
+  new_train <- binarized_trainset[-holdout[[k]], ]
+  
+new_test_no_label <- new_test[-c(1)] 
+new_test_just_label <- new_test[c(1)]
+
+test_model <- svm(label ~ ., new_train, na.action=na.pass) 
+
+pred <- predict(test_model, new_test_no_label, type =  c("class"))
+
+all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred)) 
+
+} 
+
+#table(all_results$orig, all_results$pred)
+#get_accuracy_rate(table(all_results$orig, all_results$pred), #length(all_results$pred))
+
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r svmbconfmat, echo=TRUE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+##Random Forest
+
+Lastly, several variations of the Random Forest model are created including a test for the number of trees. The first model is run without as is, without any parameters.
+
+```{r randomforest1,  echo=TRUE, message=FALSE, warning=FALSE}
+all_results <- data.frame(orig=c(), pred=c())
+for (k in 1:kfolds) {
+  new_test <- trainset[holdout[[k]], ]
+  new_train <- trainset[-holdout[[k]], ]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+  test_model <- randomForest(label ~ ., new_train, na.action=na.pass)
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+}
+
+#table(all_results$orig, all_results$pred)
+#get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r rfbconfmat2, echo=TRUE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+
+##Random Forest Best 
+
+The following tests the sensitivity to the number of trees allowed parameter. The default is 500 and the following code tests for 5 to 15.
+
+```{r randomforest2,  echo=TRUE, message=FALSE, warning=FALSE}
+prev_result <- 0
+best_result <- 0
+best_number_trees <-0
+for (trees in 5:15) {
+  if (trees %% 5 == 0) {
+    all_results <- data.frame(orig=c(), pred=c())
+    for (k in 1:kfolds) {
+      new_test <- trainset[holdout[[k]], ]
+      new_train <- trainset[-holdout[[k]], ]
+      
+      new_test_no_label <- new_test[-c(1)]
+      new_test_just_label <- new_test[c(1)]
+      
+      test_model <- randomForest(label ~ ., new_train, replace=TRUE, na.action=na.pass)
+      pred <- predict(test_model, new_test_no_label, type=c("class"))
+      
+      all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+    }
+    #table(all_results$orig, all_results$pred)
+    new_result <- get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+    
+    if (new_result > prev_result) {
+      prev_result <- new_result
+    } else {
+      best_number_trees <- trees
+      best_result <- new_result
+      break
+    }
+  }
+}  
+paste("Best Number of Trees:", best_number_trees, "- Best Result:", best_result, sep=" ")
+
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r rfbconfmat3, echo=TRUE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+##Random Forest Tuning
+
+The Random Forest Original Model is updated with parameter in an attempt to achieve a higher prediction or accuracy rate.
+
+Additionally, the files previously spit into 60% training and 40% test are used instead of k-fold or cross validation for this tuning exercise.
+
+The additional parameters are specifiying the type is classification and setting the importance and proximity parameters to true.
+
+Setting the type to classification is correct but lowered the accuracy slightly to %94.12 and will not be used
+
+Adding the parameter of importance gave a huge jump in accuracy to %97.92857.
+
+The addition of the proximity parameter set to true brought the accuracy rate to %98.02381.
+
+
+```{r rftuning,  echo=TRUE, message=FALSE, warning=FALSE}
+
+all_results <- data.frame(orig=c(), pred=c())
+
+  new_test_no_label <- test[-c(1)]
+  new_test_just_label <- test[c(1)]
+  
+ test_model <- randomForest(label ~ ., new_train, na.action=na.pass, importance = TRUE, proximity = TRUE)
+ 
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+## Result
+The following accuracy rates were achieved by each model.
+
+*Decision Tree - 0.5652   
+*Naive Bayes 0 K-folds - 0.5274  
+*Naive Bayes 3 K-folds - 0.507 
+*kNN - 0.9388  
+*SVM - 0.1159  
+*SVM with Binarized Data - 0.9114  
+*Random Forest - 0.9486
+*Random Forest for Best Tree - 0.9479 
+*Random Forest w/type classification - 0.9412
+*Random Forest w/importance set to true - 0.9793
+*Random Forest w/importance and proximity set to true - .9802
+
+Random Forest testing for best tree between 5, 10, & 15 is 15. The accuracy is only slightly less than when unspecifed which means the default of 500 trees was used.
+
+The winner is Random Forest and the model will be used to create a file of 28000 sample records to submit to Kaggle.
+
+```{r rfkaggle,  echo=TRUE, message=FALSE, warning=FALSE}
+all_results <- data.frame(orig=c(), pred=c())
+
+  new_test <- DigitTotalDF[1:28000,]
+#  new_train <- DigitTotalDF[28001:42000,]
+  
+  new_test_no_label <- new_test[-c(1)]
+  new_test_just_label <- new_test[c(1)]
+  
+ # test_model <- randomForest(label ~ ., new_train, na.action=na.pass, importance = TRUE, proximity = TRUE)  
+ 
+  pred <- predict(test_model, new_test_no_label, type=c("class"))
+  
+  all_results <- rbind(all_results, data.frame(orig=new_test_just_label$label, pred=pred))
+
+
+table(all_results$orig, all_results$pred)
+get_accuracy_rate(table(all_results$orig, all_results$pred), length(all_results$pred))
+```
+
+A confusion matrix is generated to show accuracy and other important statistics.
+
+```{r rfbconfmat, echo=TRUE,include=TRUE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+confusionMatrix(all_results$pred, all_results$orig)
+```
+
+A csv file is created for submission to Kaggle.
+
+```{r rfexport, echo=TRUE,include=FALSE}
+
+#Testing accurancy of naive bayes model with Kaggle train data sub set
+Submission1 <- data.frame("Label"=pred)
+
+Submission1$ImageId <- c(rownames(Submission1))
+
+Submission1[c("ImageId","Label")]
+
+
+write.csv(Submission1,file="C:/Data/Submission1.csv", eol = "\n", sep=",", quote = FALSE, col.names = FALSE, row.names=FALSE)
+
+```
+## Conclusion
+
+With such a large data set it would have been more efficient to create a smaller sample size in the beggining so that the models could be tuned and run faster.
+
+There are two models that showed promise and they were the kNN and Random Forest. These should be pursued for additional tuning.
+
+A sample file was created using the tuned Random Forest and submitted to Kaggle. The final accuracy rate was 95% regardless if the model from the tuning segment was used or it was rerun with a larger sample of 14k, the balance of the entire file minus the 28k records to be predicted and submitted to Kaggle. The Kaggle score was 0.10042, place 2182 under user name amaguin.
+
+
+
+
+
+
+
