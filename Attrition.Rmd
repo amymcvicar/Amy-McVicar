@@ -1,0 +1,2253 @@
+----
+title: "Attrition Analysis"
+always_allow_html: true
+output:
+  word_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+
+
+## Introduction
+
+*TeamX*
+This project was completed by:
+
+* Amy McVicar
+* Angela Garcia
+* Jennifer Mead
+* Jonathan Lee
+
+Businesses lose money when they lose employees. Employee attrition impacts businesses due to the costs of hiring and training new employees. Because of this, data-driven HR departments use data to identify who is likely to quit and to find trends in what factors influence quitting decisions, such as particular departments or locations. [1] 
+
+
+Companies have always been concerned about attrition, but "in many industries the cost of losing good workers is rising" [2]. Exact numbers vary by industry. For example, "[estimates] of annual turnover among U.S. salespeople run as high as 27%—twice the rate in the overall labor force." [3] 
+
+A high attrition rate adds up: "U.S. firms spend $15 billion a year training salespeople and another $800 billion on incentives, and attrition reduces the return on those investments." [4] In some cases, the cost of losing an employee can be as much as twice their yearly salary. [5]
+
+When employees see other employees leave, attrition can increase. "In settings with high voluntary turnover, employees often lose faith in the company’s strategic direction (because they see others jumping ship), and they tend to be more aware of outside job opportunities, partly because their networks include former colleagues who recently defected. And when there’s lots of involuntary turnover, employees may lack trust in managers, feel little job security, and move on." [6]
+
+Those costs add up. "It takes an average of 24 days to fill a job, costing employers up to $4,000 per hire-- maybe more, depending on your industry."[7]
+
+Another study "estimates that 42 million, or one in four, employees will leave their jobs in 2018, and that nearly 77 percent, or three-fourths, of that turnover could be prevented by employers."[8]
+
+Indicators to look for
+Researchers have found many factors that can be used to identify an increased likelihood of quitting.  One study found that these "… include leaving work early, showing less focus or effort, and being reluctant to commit to long-term assignments." [9]
+
+Another study found that among people who left within the first six months, common issues were: not having clear priorities, a lack of effective training, and not feeling recognized for their contributions. [10]
+
+Some research has been done on specific groups. Executives may have different motivators than sales people. One study identified key factors for executives leaving jobs in less than a year, including pay, a work culture that doesn't recognize performance,  and a lack of synergy among bosses, peers, and direct reports.   [11]
+
+Because there are many potential factors that influence voluntary attrition and because there is known variation between industries, roles, and companies, it is useful for companies to analyze their own data to determine patterns in their attrition. 
+
+## Analysis and Models
+
+This analysis looks at data from IBM that shows common attrition factors for a fictional company. 
+
+Analysis will include using a variety of visualization and machine learning methods and then comparing the results. Combining methods helps to reduce bias [12] and gives a more comprehensive view of the data. 
+
+### About the data
+
+Download the data from https://www.kaggle.com/pavansubhasht/ibm-hr-analytics-attrition-dataset
+
+Before running models on the data, the following steps were performed:
+
+* identify variables to remove because the data is bad or not useful
+* set appropriate types for each column (e.g. factor, numeric)
+* visualize the variables to give a sense of where to focus analysis
+* look for associations/correlations between variables
+* perform data transformations for each method, such as creating transactions before using ARM and converting values to numbers before using k-means
+
+#### Load the data
+```{r}
+# load in the data
+HR_original <- read.csv("http://www.creativecubecompany.com/syracuse/ist707/Attrition_ORIGINAL.csv", fileEncoding ="UTF-8-BOM")
+```
+
+#### Clean the data
+
+Look at the range and typical values for all variables to identify if any should be eliminated due to not being useful. 
+```{r}
+HR_clean <- HR_original
+summary(HR_clean)
+
+```
+```{r}
+str(HR_clean)
+```
+Actions:
+
+* remove EmployeeCount because it is always 1
+* remove Over18 because it is always Y
+* remove StandardHours because it is always 80
+* change the name of i..Age to fix a typo
+
+```{r}
+# reference-- drop columns by name: https://stackoverflow.com/questions/5234117/how-to-drop-columns-by-name-in-a-data-frame
+# reference -- move column to the first column: https://stackoverflow.com/questions/22286419/move-a-column-to-first-position-in-a-data-frame
+
+library(dplyr)
+
+HR_clean <- subset(HR_clean, select=-c(EmployeeCount, StandardHours, Over18))
+
+HR_clean <- HR_clean %>%
+            select(EmployeeNumber, everything())
+head(HR_clean, 10)
+```
+
+
+Look at histograms of all numeric variables to identify which should be categorical instead
+
+```{r}
+# reference-- histogram of all variables: https://drsimonj.svbtle.com/quick-plot-of-all-variables
+library(purrr)
+library(tidyr)
+library(ggplot2)
+
+HR_clean %>%
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+```
+Histograms with parallel lines instead of of distributions with close bins are typically factors. It looks like the following columns are actually factors instead of integers. Some models need numerical inputs and some need factors, but for the moment they should be converted. 
+
+Numerical columns that should be factors:
+
+* Education
+* EnvironmentSatisfaction
+* JobInvolvement
+* JobLevel
+* JobSatisfaction
+* PerformanceRating
+* RelationshipSatisfaction
+* StockOptionLevel
+* WorkLifeBalance
+
+```{r}
+HR_clean$Education <- as.factor(HR_clean$Education)
+HR_clean$EnvironmentSatisfaction <- as.factor(HR_clean$EnvironmentSatisfaction)
+HR_clean$JobInvolvement <- as.factor(HR_clean$JobInvolvement)
+HR_clean$JobLevel <- as.factor(HR_clean$JobLevel)
+HR_clean$JobSatisfaction <- as.factor(HR_clean$JobSatisfaction)
+HR_clean$PerformanceRating <- as.factor(HR_clean$PerformanceRating)
+HR_clean$RelationshipSatisfaction <- as.factor(HR_clean$RelationshipSatisfaction)
+HR_clean$StockOptionLevel <- as.factor(HR_clean$StockOptionLevel)
+HR_clean$WorkLifeBalance <- as.factor(HR_clean$WorkLifeBalance)
+
+head(HR_clean)
+```
+
+Check for blanks
+```{r}
+#reference -- checking for blanks: https://stackoverflow.com/questions/40715508/r-count-cells-with-missing-values-across-each-row
+
+colSums(is.na(HR_clean) | HR_clean == "" | HR_clean == " ")
+
+```
+
+
+#### Visualize the variables
+There are 32 variables in total. 
+We can check again for any missing variables, and there are none.
+
+
+```{r eda1}
+if("DataExplorer" %in% rownames(installed.packages()) == FALSE) {install.packages('DataExplorer') }
+library(DataExplorer)
+HR_eda <- HR_clean
+plot_str(HR_eda)
+plot_missing(HR_eda)
+
+```
+
+From correlating the attributes we can see pockets of correlation.
+
+
+
+Most notably are:
+
+Years with Current Manager
+
+Years Since Last Promotion
+
+Years in Current Role
+
+Years at Company
+
+
+And no surprise, these correlate with Age, Income, and Total Working Years.
+
+```{r eda2}
+
+plot_correlation(HR_eda, type = 'continuous')
+
+
+```
+
+Simple barcharts of the attributes show us some interesting facts that we can use for deeper analysis. For example, most of the universe is ‘no’ to attrition. 
+The Education Field and Department are limited in the selections available.
+This might help us understand the context of the findings of models.
+For example, there are only three department types (R&D, Sales, & HR). 
+We might find that the weight of this attribute in models may only be relevant to this limited dataset and not as applicable to datasets that are more representative of real organizations. This is something we might not notice without this simple exploratory examination of the data first.
+
+
+```{r eda3}
+
+plot_bar(HR_eda)
+#create_report(HR_eda)
+
+```
+
+
+Each variable, except EmployeeNumber, in the data set is examined for significant variance in the attrition yes versus no segments using simple analysis and plotting.
+
+```{r}
+
+plot(HR_eda$Attrition, HR_eda$Age, main = "Age", ylab = "Age", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$BusinessTravel, main = "Business Travel", ylab = "Age", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$DailyRate, main = "Daily Rate", ylab = "Daily Rate", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$Department, main = "Department", ylab = "Department", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$DistanceFromHome, main = "Distance From Home", ylab = "Distance From Home", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$Education, main = "Education", ylab = "Education", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$EducationField, main = "Education Field", ylab = "Education Field", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$EnvironmentSatisfaction, main = "Environmental Satisfaction", ylab = "Environmental Satisfaction", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$Gender, main = "Gender", ylab = "Gender", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$HourlyRate, main = "Hourly Rate", ylab = "Hourly Rate", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$JobInvolvement, main = "Job Involvment", ylab = "Job Involvement", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$JobLevel, main = "Job Level", ylab = "Job Level", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$JobRole, main = "Job Role", ylab = "Job Role", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$JobSatisfaction, main = "Job Satisfaction", ylab = "Job Satisfaction", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$MaritalStatus, main = "Marital Status", ylab = "Marital Status", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$MonthlyIncome, main = "Monthly Income", ylab = "Monthly Income", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$MonthlyRate, main = "Monthly Rate", ylab = "Monthly Rate", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$NumCompaniesWorked, main = "Num Companies Worked", ylab = "Num Companies Worked", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$OverTime, main = "Over Time", ylab = "Over Time", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$PercentSalaryHike, main = "Percent Salary Hike", ylab = "Percent Salary Hike", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$PerformanceRating, main = "Performance Rating", ylab = "Performance Rating", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$RelationshipSatisfaction, main = "Relationship Satisfaction", ylab = "Relationship Satisfaction", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$StockOptionLevel, main = "Stock Option Level", ylab = "Stock Option Level", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$TotalWorkingYears, main = "Total Working Years", ylab = "Total Working Years", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$TrainingTimesLastYear, main = "Training Times Last Year", ylab = "Training Times Last Year", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$WorkLifeBalance, main = "Work Life Balance", ylab = "Work Life Balance", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$YearsAtCompany, main = "Years at Company", ylab = "Years at Company", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$YearsInCurrentRole, main = "Years in Current Role", ylab = "Years in Current Role", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$YearsSinceLastPromotion, main = "Years Since Last Promotion", ylab = "Years Since Last Promotion", xlab = "Attrition")
+
+plot(HR_eda$Attrition, HR_eda$YearsWithCurrManager, main = "Years With Current Manager", ylab = "Years With Current Manager", xlab = "Attrition")
+
+```
+On visual inspection the following variables appear to have a significant difference in the attrition yes and no segments:
+
+EnvironmentalSatisfaction
+JobInvolvement
+JobLevel
+JobRole
+JobSatisfaction
+MaritalStatus
+MonthlyIncome
+NumCompaniesWorked
+OverTime
+RelationshipSatisfaction
+
+On initial visual analysis and inspection, the following attributes may have significance:
+
+StopOptionLevel
+TotalWorkingYears
+TrainingTimesLastYear
+WorkLifeBalance
+YearsAtCompany
+YearsInCurrentCompany
+YearsInCurrentRole
+YearsWithCurrentManager
+
+Additionally, initial inspection shows that more than a few attributes appear to be highly correlated with each other. This information may be used for further analysis and refining the attributes used in models for simplification.
+
+
+
+
+
+```{r Association- Data setup}
+#Install packages if they dont exist
+
+if("formattable" %in% rownames(installed.packages()) == FALSE) {install.packages("formattable")}
+library(formattable)
+
+if("gridExtra" %in% rownames(installed.packages()) == FALSE) {install.packages("gridExtra")}
+library(gridExtra)
+
+if("grid" %in% rownames(installed.packages()) == FALSE) {install.packages("grid")}
+library(grid)
+
+if("corrplot" %in% rownames(installed.packages()) == FALSE) {install.packages("corrplot")}
+library(corrplot)
+
+if("rquery" %in% rownames(installed.packages()) == FALSE) {install.packages("rquery")}
+library(rquery)
+
+if("GoodmanKruskal" %in% rownames(installed.packages()) == FALSE) {install.packages("GoodmanKruskal")}
+library(GoodmanKruskal)
+
+
+```
+
+```{r Association- Data Transformation}
+
+# Data Transformation
+
+# Data Assessment
+HR_linear<-HR_clean
+
+#Create Categories for numeric values with high number of records (Based on Percentiles)
+
+## Categoric Age
+
+# Age Percentiles
+Percentile_00  = min(HR_linear$Age)
+Percentile_33  = quantile(HR_linear$Age, 0.33333)
+Percentile_67  = quantile(HR_linear$Age, 0.66667)
+Percentile_100 = max(HR_linear$Age)
+
+# Values
+HR.BindA = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindA)[[2]] = "Value"
+#HR.BindA
+
+#Age: 
+HR_linear$AgeRange[HR_linear$Age >= Percentile_00 & HR_linear$Age <  Percentile_33]  = "Lower_Range"
+HR_linear$AgeRange[HR_linear$Age >= Percentile_33 & HR_linear$Age <  Percentile_67]  = "Mid_Range"
+HR_linear$AgeRange[HR_linear$Age >= Percentile_67 & HR_linear$Age <= Percentile_100] = "Higher_Range"
+
+## Categoric Hourly Rate
+
+# Hourly Rate Percentiles
+Percentile_00  = min(HR_linear$HourlyRate)
+Percentile_33  = quantile(HR_linear$HourlyRate, 0.33333)
+Percentile_67  = quantile(HR_linear$HourlyRate, 0.66667)
+Percentile_100 = max(HR_linear$HourlyRate)
+
+# Values
+HR.BindH = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindH)[[2]] = "Value"
+#HR.BindH
+
+#Hourly Rate Ranges: 
+HR_linear$HourlyRateRange[HR_linear$HourlyRate >= Percentile_00 & HR_linear$HourlyRate <  Percentile_33]  = "Low_Range"
+HR_linear$HourlyRateRange[HR_linear$HourlyRate >= Percentile_33 & HR_linear$HourlyRate <  Percentile_67]  = "Mid_Range"
+HR_linear$HourlyRateRange[HR_linear$HourlyRate >= Percentile_67 & HR_linear$HourlyRate <= Percentile_100] = "High_Range"
+
+## Categoric Daily Rate
+
+# Daily Rate Percentiles
+Percentile_00  = min(HR_linear$DailyRate)
+Percentile_33  = quantile(HR_linear$DailyRate, 0.33333)
+Percentile_67  = quantile(HR_linear$DailyRate, 0.66667)
+Percentile_100 = max(HR_linear$DailyRate)
+
+# Values
+HR.BindDR = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindDR)[[2]] = "Value"
+#HR.BindDR
+
+# Daily Rate Ranges: 
+HR_linear$DailyRateRange[HR_linear$DailyRate >= Percentile_00 & HR_linear$DailyRate <  Percentile_33]  = "Low_Range"
+HR_linear$DailyRateRange[HR_linear$DailyRate >= Percentile_33 & HR_linear$DailyRate <  Percentile_67]  = "Mid_Range"
+HR_linear$DailyRateRange[HR_linear$DailyRate >= Percentile_67 & HR_linear$DailyRate <= Percentile_100] = "High_Range"
+
+
+## Categoric Monthly Rate
+
+# Monthly Rate Percentiles
+Percentile_00  = min(HR_linear$MonthlyRate)
+Percentile_33  = quantile(HR_linear$MonthlyRate, 0.33333)
+Percentile_67  = quantile(HR_linear$MonthlyRate, 0.66667)
+Percentile_100 = max(HR_linear$MonthlyRate)
+
+# Values
+HR.BindMR = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindMR)[[2]] = "Value"
+#HR.BindMR
+
+# Monthly Rate Level
+HR_linear$MonthRateLevel[HR_linear$MonthlyRate >= Percentile_00 & HR_linear$MonthlyRate <  Percentile_33]  = "Low_Income"
+HR_linear$MonthRateLevel[HR_linear$MonthlyRate >= Percentile_33 & HR_linear$MonthlyRate <  Percentile_67]  = "Mid_Income"
+HR_linear$MonthRateLevel[HR_linear$MonthlyRate >= Percentile_67 & HR_linear$MonthlyRate <= Percentile_100] = "High_Income"
+
+
+# Categoric Monthly Income
+
+# Monthly Income Percentiles
+Percentile_00  = min(HR_linear$MonthlyIncome)
+Percentile_33  = quantile(HR_linear$MonthlyIncome, 0.33333)
+Percentile_67  = quantile(HR_linear$MonthlyIncome, 0.66667)
+Percentile_100 = max(HR_linear$MonthlyIncome)
+
+# Values
+HR.BindI = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindI)[[2]] = "Value"
+#HR.BindI
+
+# Monthly Income Level
+HR_linear$MonthIncomeLevel[HR_linear$MonthlyIncome >= Percentile_00 & HR_linear$MonthlyIncome <  Percentile_33]  = "Low_Income"
+HR_linear$MonthIncomeLevel[HR_linear$MonthlyIncome >= Percentile_33 & HR_linear$MonthlyIncome <  Percentile_67]  = "Mid_Income"
+HR_linear$MonthIncomeLevel[HR_linear$MonthlyIncome >= Percentile_67 & HR_linear$MonthlyIncome <= Percentile_100] = "High_Income"
+
+# Categoric Distance From Home
+
+# Distance From Home Percentiles
+Percentile_00  = min(HR_linear$DistanceFromHome)
+Percentile_33  = quantile(HR_linear$DistanceFromHome, 0.33333)
+Percentile_67  = quantile(HR_linear$DistanceFromHome, 0.66667)
+Percentile_100 = max(HR_linear$DistanceFromHome)
+
+# Values
+HR.BindD = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindD)[[2]] = "Value"
+#HR.BindD
+
+# Distance From Home Ranges: 
+HR_linear$DistHomeRange[HR_linear$DistanceFromHome >= Percentile_00 & HR_linear$DistanceFromHome <  Percentile_33]  = "Low_Distance"
+HR_linear$DistHomeRange[HR_linear$DistanceFromHome >= Percentile_33 & HR_linear$DistanceFromHome <  Percentile_67]  = "Mid_Distance"
+HR_linear$DistHomeRange[HR_linear$DistanceFromHome >= Percentile_67 & HR_linear$DistanceFromHome <= Percentile_100] = "High_Distance"
+
+
+# Categoric Number of Companies Worked
+
+# Number of Companies worked Percentiles
+Percentile_00  = min(HR_linear$NumCompaniesWorked)
+Percentile_33  = quantile(HR_linear$NumCompaniesWorked, 0.33333)
+Percentile_67  = quantile(HR_linear$NumCompaniesWorked, 0.66667)
+Percentile_100 = max(HR_linear$NumCompaniesWorked)
+
+# Values
+HR.BindC = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindC)[[2]] = "Value"
+#HR.BindC
+
+# Number of Companies worked Ranges: 
+HR_linear$NumCompWorked[HR_linear$NumCompaniesWorked >= Percentile_00 & HR_linear$NumCompaniesWorked <  Percentile_33]  = "Low_Number"
+HR_linear$NumCompWorked[HR_linear$NumCompaniesWorked >= Percentile_33 & HR_linear$NumCompaniesWorked <  Percentile_67]  = "Mid_Number"
+HR_linear$NumCompWorked[HR_linear$NumCompaniesWorked >= Percentile_67 & HR_linear$NumCompaniesWorked <= Percentile_100] = "High_Number"
+
+# Categoric Salary Increase
+
+# Salary Increase Percentiles
+Percentile_00  = min(HR_linear$PercentSalaryHike)
+Percentile_33  = quantile(HR_linear$PercentSalaryHike, 0.33333)
+Percentile_67  = quantile(HR_linear$PercentSalaryHike, 0.66667)
+Percentile_100 = max(HR_linear$PercentSalaryHike)
+
+# Values
+HR.BindS = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindS)[[2]] = "Value"
+#HR.BindS
+
+# Salary Increase worked Ranges: 
+HR_linear$SalaryIncreaseLevel[HR_linear$PercentSalaryHike >= Percentile_00 & HR_linear$PercentSalaryHike <  Percentile_33]  = "Low_Increase"
+HR_linear$SalaryIncreaseLevel[HR_linear$PercentSalaryHike >= Percentile_33 & HR_linear$PercentSalaryHike <  Percentile_67]  = "Avg_Increase"
+HR_linear$SalaryIncreaseLevel[HR_linear$PercentSalaryHike >= Percentile_67 & HR_linear$PercentSalaryHike <= Percentile_100] = "High_Increase"
+
+# Categoric Working Years
+
+# Working Years Percentiles
+Percentile_00  = min(HR_linear$TotalWorkingYears)
+Percentile_33  = quantile(HR_linear$TotalWorkingYears, 0.33333)
+Percentile_67  = quantile(HR_linear$TotalWorkingYears, 0.66667)
+Percentile_100 = max(HR_linear$TotalWorkingYears)
+
+# Values
+HR.BindW = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindW)[[2]] = "Value"
+#HR.BindW
+
+# Working Years Ranges: 
+HR_linear$WorkingYears[HR_linear$TotalWorkingYears >= Percentile_00 & HR_linear$TotalWorkingYears <  Percentile_33]  = "Lower_Range"
+HR_linear$WorkingYears[HR_linear$TotalWorkingYears >= Percentile_33 & HR_linear$TotalWorkingYears <  Percentile_67]  = "Mid_Range"
+HR_linear$WorkingYears[HR_linear$TotalWorkingYears >= Percentile_67 & HR_linear$TotalWorkingYears <= Percentile_100] = "Higher_Range"
+
+# Categoric Years At Company
+
+# Years At Company Percentiles
+Percentile_00  = min(HR_linear$YearsAtCompany)
+Percentile_33  = quantile(HR_linear$YearsAtCompany, 0.33333)
+Percentile_67  = quantile(HR_linear$YearsAtCompany, 0.66667)
+Percentile_100 = max(HR_linear$YearsAtCompany)
+
+# Values
+HR.BindY = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindY)[[2]] = "Value"
+#HR.BindY
+
+# Years At Company Ranges: 
+HR_linear$CompanyYears[HR_linear$YearsAtCompany >= Percentile_00 & HR_linear$YearsAtCompany <  Percentile_33]  = "Lower_Range"
+HR_linear$CompanyYears[HR_linear$YearsAtCompany >= Percentile_33 & HR_linear$YearsAtCompany <  Percentile_67]  = "Mid_Range"
+HR_linear$CompanyYears[HR_linear$YearsAtCompany >= Percentile_67 & HR_linear$YearsAtCompany <= Percentile_100] = "Higher_Range"
+
+# Categoric Years in Current Role
+
+# Years in Current Role Percentiles
+Percentile_00  = min(HR_linear$YearsInCurrentRole)
+Percentile_33  = quantile(HR_linear$YearsInCurrentRole, 0.33333)
+Percentile_67  = quantile(HR_linear$YearsInCurrentRole, 0.66667)
+Percentile_100 = max(HR_linear$YearsInCurrentRole)
+
+# Values
+HR.BindR = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindR)[[2]] = "Value"
+#HR.BindR
+
+# Years in Current Role Ranges: 
+HR_linear$RoleYear[HR_linear$YearsInCurrentRole >= Percentile_00 & HR_linear$YearsInCurrentRole <  Percentile_33]  = "Lower_Range"
+HR_linear$RoleYear[HR_linear$YearsInCurrentRole >= Percentile_33 & HR_linear$YearsInCurrentRole <  Percentile_67]  = "Mid_Range"
+HR_linear$RoleYear[HR_linear$YearsInCurrentRole >= Percentile_67 & HR_linear$YearsInCurrentRole <= Percentile_100] = "Higher_Range"
+
+# Categoric Years No Promotion
+
+# Years No Promotion Percentiles
+Percentile_00  = min(HR_linear$YearsSinceLastPromotion)
+Percentile_33  = quantile(HR_linear$YearsSinceLastPromotion, 0.33333)
+Percentile_67  = quantile(HR_linear$YearsSinceLastPromotion, 0.66667)
+Percentile_100 = max(HR_linear$YearsSinceLastPromotion)
+
+# Values
+HR.BindP = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindP)[[2]] = "Value"
+#HR.BindP
+
+# Years No Promotion Ranges: 
+HR_linear$NoPromoYears[HR_linear$YearsSinceLastPromotion >= Percentile_00 & HR_linear$YearsSinceLastPromotion <  Percentile_33]  = "Lower_Range"
+HR_linear$NoPromoYears[HR_linear$YearsSinceLastPromotion >= Percentile_33 & HR_linear$YearsSinceLastPromotion <  Percentile_67]  = "Mid_Range"
+HR_linear$NoPromoYears[HR_linear$YearsSinceLastPromotion >= Percentile_67 & HR_linear$YearsSinceLastPromotion <= Percentile_100] = "Higher_Range"
+
+
+# Categoric Years Current Manager
+
+# Years Current Manager Percentiles
+Percentile_00  = min(HR_linear$YearsWithCurrManager)
+Percentile_33  = quantile(HR_linear$YearsWithCurrManager, 0.33333)
+Percentile_67  = quantile(HR_linear$YearsWithCurrManager, 0.66667)
+Percentile_100 = max(HR_linear$YearsWithCurrManager)
+
+# Values
+HR.BindM = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.BindM)[[2]] = "Value"
+#HR.BindM
+
+# Years Current Manager Ranges: 
+HR_linear$ManagerYears[HR_linear$YearsWithCurrManager >= Percentile_00 & HR_linear$YearsWithCurrManager <  Percentile_33]  = "Lower_Range"
+HR_linear$ManagerYears[HR_linear$YearsWithCurrManager >= Percentile_33 & HR_linear$YearsWithCurrManager <  Percentile_67]  = "Mid_Range"
+HR_linear$ManagerYears[HR_linear$YearsWithCurrManager >= Percentile_67 & HR_linear$YearsWithCurrManager <= Percentile_100] = "Higher_Range"
+
+# Remove Numerical values categorized
+HR_linear<-HR_linear[c(-1,-2,-5,-7,-12,-18,-19,-20,-22,-26,-29,-30,-31,-32)]
+
+# Convert all other Numerical values to factors
+HR_linear<-lapply(HR_linear, function(x){as.factor(x)})
+HR_linear = as.data.frame(HR_linear)
+str(HR_linear)
+#summary(HR_linear)
+
+Percentiles.HR<-cbind(HR.BindA,HR.BindH,HR.BindDR,HR.BindMR,HR.BindI,HR.BindD,HR.BindC,HR.BindS,HR.BindW,HR.BindY,HR.BindR,HR.BindP,HR.BindM)
+colnames(Percentiles.HR)<-c("Age","HourlyRate","DailyRate","MonthlyRate","MonthlyIncome","HomeDistance","CompaniesWorked","SalaryIncrease","WorkingYears","YearsAtCompany","YearsInRole","NoPromoYears","YearsWManager")
+if("knitr" %in% rownames(installed.packages()) == FALSE) {install.packages('knitr') }
+library(knitr)
+kable(t(Percentiles.HR),digits=0, format="markdown", padding =2, format.args = list(big.mark = ","))
+grid.arrange(tableGrob(t(format(Percentiles.HR,digits=0,big.mark=",")), 
+                       theme=ttheme_default(core=list(fg_params=list(fontface=3),big.mark = ","),
+                                         colhead=list(fg_params=list(col="navyblue", fontface=4L)),                                                                                 rowhead=list(fg_params=list(col="navyblue", fontface=3L)))))
+```
+
+```{r  Goodman and Kruskal’s tau -Correlation of Categorical Data}
+
+varCompany.set<- c("Attrition","BusinessTravel","Department","EnvironmentSatisfaction","OverTime","RelationshipSatisfaction","StockOptionLevel","TrainingTimesLastYear", "WorkLifeBalance", "SalaryIncreaseLevel")
+varPerson.set<- c("Attrition","Gender","MaritalStatus","AgeRange","Education","EducationField","PerformanceRating", "NumCompWorked","DistHomeRange","WorkingYears","CompanyYears")
+varJob.set<- c("Attrition","JobInvolvement","JobLevel","JobRole","JobSatisfaction","HourlyRateRange","MonthRateLevel","DailyRateRange", "MonthIncomeLevel", "NoPromoYears","ManagerYears","RoleYear")
+
+Frame1<- subset(HR_linear, select = varCompany.set)
+Frame2<- subset(HR_linear, select = varPerson.set)
+Frame3<- subset(HR_linear, select = varJob.set)
+
+GKmatrix1<- GKtauDataframe(Frame1)
+plot(GKmatrix1, corrColors = "red")
+
+GKmatrix1<- GKtauDataframe(Frame2)
+plot(GKmatrix1, corrColors = "navyblue")
+
+GKmatrix1<- GKtauDataframe(Frame3)
+plot(GKmatrix1, corrColors = "darkgreen")
+
+#Logistic Regression Model
+Attrition.Model<-glm(Attrition~.,data=HR_linear, family = binomial())
+summary(Attrition.Model)
+plot(Attrition.Model)
+coef(Attrition.Model)
+
+```
+Linear regression of categorical data doesn't show high associations to attrition, with the hisghest one being Attrition and Overtime at 0.06.
+
+Considering associations of other variables the highest association were:
+
+Age Range to Working Years
+Working Years to Years in Company
+Job level and job role to Monthly Income level and,
+Time in a role to time with a manager 
+
+### Models
+
+#### Association Rule Mining
+# References:
+* https://rcompanion.org/handbook/E_05.html
+* https://towardsdatascience.com/association-rule-mining-in-r-ddf2d044ae50
+* https://www.datacamp.com/community/tutorials/market-basket-analysis-r
+```{r ARM-Data setup}
+
+#Install packages if they dont exist
+
+  # Package arules
+if("arules" %in% rownames(installed.packages()) == FALSE) {install.packages("arules")}
+library(arules)
+
+  # Package arulesViz
+if("arulesViz" %in% rownames(installed.packages()) == FALSE) {install.packages("arulesViz")}
+library(arulesViz)
+
+  # RColorBrewer
+if("RColorBrewer" %in% rownames(installed.packages()) == FALSE) {install.packages("RColorBrewer")}
+library(RColorBrewer)
+
+if("gridExtra" %in% rownames(installed.packages()) == FALSE) {install.packages("gridExtra")}
+library(gridExtra)
+
+if("grid" %in% rownames(installed.packages()) == FALSE) {install.packages("grid")}
+library(grid)
+
+if("ggplot2" %in% rownames(installed.packages()) == FALSE) {install.packages("ggplot2")}
+library(ggplot2)
+
+if("lattice" %in% rownames(installed.packages()) == FALSE) {install.packages("lattice")}
+library(lattice)
+
+#Data Assessment
+HR_arm <- HR_clean
+str(HR_arm)
+```
+Actions required:
+1. Eliminate Employee ID
+2. Redundant Attributes removed
+    Daily Rate
+    Hourly Rate
+    Monthly Rate
+3. Other Numerical Values need to be converted to Factors
+
+```{r ARM-Data Transformation}
+
+# Data Transformation
+
+# Remove Redundant, None added value attributes
+HR_arm<-HR_arm[c(-1,-5,-12,-19)]
+
+#Create a Categoric Income Label based on Percentiles
+
+  # Determining percentiles
+Percentile_00  = min(HR_arm$MonthlyIncome)
+Percentile_33  = quantile(HR_arm$MonthlyIncome, 0.33333)
+Percentile_67  = quantile(HR_arm$MonthlyIncome, 0.66667)
+Percentile_100 = max(HR_arm$MonthlyIncome)
+
+  # Values
+HR.Bind = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.Bind)[[2]] = "Value"
+HR.Bind
+
+  # Grouping
+HR_arm$Group[HR_arm$MonthlyIncome >= Percentile_00 & HR_arm$MonthlyIncome <  Percentile_33]  = "Low_Income"
+HR_arm$Group[HR_arm$MonthlyIncome >= Percentile_33 & HR_arm$MonthlyIncome <  Percentile_67]  = "Mid_Income"
+HR_arm$Group[HR_arm$MonthlyIncome >= Percentile_67 & HR_arm$MonthlyIncome <= Percentile_100] = "High_Income"
+
+  # Remove Numerical "values"Monthly Income"
+HR_arm<-HR_arm[-15]
+
+  # Convert all other Numerical values to factors
+HR_arm<-lapply(HR_arm, function(x){as.factor(x)})
+HR_arm = as.data.frame(HR_arm)
+str(HR_arm)
+
+  # Convert to Transactional Data
+HR_Trans = as(HR_arm, "transactions")
+HR_Trans
+```
+
+Data set as transactions! Lets take a look
+
+```{r ARM-Transactions-Summary}
+
+# Information about the transactions data
+
+summary(HR_Trans)
+```
+  * 1470 rows (elements/itemsets/transactions) and 303 columns (items)
+  * Dense Matrix based on Percent of Non-Zero cells in the matrix (Density) of 0.09240924. 
+  * Most Frequency Items:
+    - PerformanceRating=3:  1244
+    - Attrition=No: 1233
+    - OverTime=No: 1054
+    - BusinessTravel=Travel_Rarely: 1043
+    - Department=Research & Development: 961
+    
+```{r ARM-Transactions-Item Frequency Plot}
+
+par(mfrow=c(2,2))
+
+# Item Frequency Plot Top 10 Relative
+arules::itemFrequencyPlot(HR_Trans,support = 0.2, cex.names=0.7, topN=10, col=brewer.pal(8,'RdGy'), type="relative",main="Relative Top 10 Items Frequency Plot", horiz=TRUE)
+
+# Item Frequency Plot Top 10 Absolute
+itemFrequencyPlot(HR_Trans,support = 0.2, cex.names=0.7, topN=10, col=brewer.pal(8,'RdBu'), type="absolute", main="Absolute Top 10 Items Frequency Plot",horiz=TRUE)
+
+# Item Frequency Plot for top 5 Relative
+itemFrequencyPlot(HR_Trans,support = 0.2, cex.names=0.7, topN=5, col=brewer.pal(8,'RdGy'),type="relative", main="Relative Top 5 Items Frequency Plot", horiz=TRUE)
+
+# Item Frequency Plot for top 5 most frequent items
+itemFrequencyPlot(HR_Trans,support = 0.2, cex.names=0.7, topN= 5,col=brewer.pal(8,'RdBu'), type="absolute", main="Absolute Top 5 Items Frequency Plot",horiz=TRUE)
+
+```
+"Attrition= No" is in the top of the list along with No Overtime, Travel Rarely and Performance Rating =3
+
+```{r ARM-Apriori}
+# Apriori Rules with Support = 0.1 and Confidence 0.5
+HR_Rules1<-apriori(HR_Trans,parameter = list(support=0.1, confidence =0.5, maxlen = 305))
+HR_Rules1
+
+
+## Changing some parameters
+    ### For stronger rules: Increased confidence.
+    ### For lenghtier rules increase the maxlen parameter.
+    ### To eliminate shorter rules decrease the minlen parameter.
+
+# Apriori Rules with Support = 0.1 and Confidence 0.9 max items 30 min items 3
+HR_Rules2<-apriori(HR_Trans,parameter = list(support=0.1, confidence =0.9, maxlen = 30, minlen = 3))
+HR_Rules2
+
+# Apriori Rules with Support = 0.01 and Confidence 0.8 and RHS fixed to Attrition =Yes
+HR_Rules3<-apriori(HR_Trans,parameter = list(support=0.01, confidence =0.8, maxlen = 30), appearance = list(rhs="Attrition=Yes"))
+HR_Rules3
+
+# Apriori Rules with Support = 0.1 and Confidence 0.9 and RHS fixed to Attrition =No
+HR_Rules4<-apriori(HR_Trans,parameter = list(support=0.1, confidence =0.8, maxlen = 30), appearance = list(rhs="Attrition=No"))
+HR_Rules4
+```
+Based on 303 items and 1,470 transactions and changing parameters created rules:
+* First set of rules, created 10,478 rules
+* Second set of rules created 921 rules
+* Third set of rules (fixing the RHS to Attrition=No) 243 rules
+* Fourth set of rules (fixing the RHS to Attrition=Yes) 1557 rules
+
+# Support is an indication of how frequently the itemset appears in the dataset. For Attrition = Yes support was reduced to 0.01 as opposed to the other models that considered support = 0.1
+# Confidence is an indication of how often the rule has been found to be true. All rules generated with confidence >= 80%
+
+```{r ARM-Rules Summaries}
+
+#Rules Summaries (just for Rules with Attrition Fixed)
+
+# Attrition = Yes
+
+summary(HR_Rules3)
+
+# Attrition = No
+
+summary(HR_Rules4)
+```
+For Attrition = Yes
+* Parameter Specification: Support= 0.01 and Confidence = 0.8
+* A length of 6 items has the most rules (100) while a length of 10 items has only one
+* Summary of Quality Measures: Min and Max Values for Support, Confidence and Lift shown
+For Attrition = No
+* Parameter Specification: Support= 0.1 and Confidence = 0.8 (Same confidence much lower Support than the prior one)
+* A length of 4 items has the most rules (688) while a length of 1 item has only one
+* Summary of Quality Measures: Min and Max Values for Support, Confidence and Lift shown
+
+Next: Looking at the top 20 rules considering 1 set of rules created without a fix RHS and the 2 RHS fixed rules
+```{r ARM-Rules Inspection}
+
+
+# Top 100 Rules for second set of Rules (Not Fixed)
+
+inspect(head(sort(HR_Rules2, by = "confidence"), 100))
+  
+# Top 20 Rules for rules with RHS at Attrition = Yes
+
+inspect(head(sort(HR_Rules3, by = "confidence"), 20))
+
+# Top 20 Rules for rules with RHS at Attrition = No
+
+inspect(head(sort(HR_Rules4, by = "confidence"), 20))
+
+```
+
+The first set of rules provides insight in regards to performance rating,department information,stock option level and job level but no information about attrition. By fixing the RHS to Attrition = Yes and Attrition = No rules provide more insight.
+
+With Attrition = Yes, the most frequent factors in the top 20 rules are:
+* Marital Status = Single. In 13 out of the 20 rules
+* Overtime = Yes. In 18 out of the 20 rules
+* Years with current Manager = 0. In 16 out of the 20 rules
+* Years in current Role = 0. In 12 out of the 20 rules
+* Low Income. In 10 out of the 20 rules
+
+With Attrition = No, the most frequent factors in the top 20 rules are:
+* Department=Research & Development. In 10 out of the 20 rules                                                      
+* OverTime=No. In 15 out of the 20 rules                                                                            
+* StockOptionLevel=1. In 6 out of the 20 rules                                                                     
+* WorkLifeBalance=3. In 11 out of the 20 rules       
+
+```{r ARM-Rules Plots}
+
+### Rules with Confidence > 40 and 50%
+  
+## Attrition = Yes
+subsetRulesYes<-HR_Rules3[quality(HR_Rules3)$confidence>0.4]
+  
+## Attrition = No
+subsetRulesNo<-HR_Rules4[quality(HR_Rules4)$confidence>0.5]
+
+### Plots
+
+## Scatter
+
+# Attrition = Yes
+plot(subsetRulesYes)
+
+# Attrition = No
+plot(subsetRulesNo)
+
+## Two-Key 
+
+# Attrition = Yes
+plot(subsetRulesYes, method = "two-key plot")
+
+# Attrition = No
+plot(subsetRulesNo, method = "two-key plot")
+
+## Matrix 3D
+
+# Attrition = Yes
+plot(subsetRulesYes, method = "matrix3d")
+
+# Attrition = No
+plot(subsetRulesNo, method = "matrix3d")
+
+### Interactive Scatter-Plot
+
+# Attrition = Yes
+plotly_arules(subsetRulesYes)
+
+# Attrition = No
+plotly_arules(subsetRulesNo)
+
+```
+
+```{r ARM-Graph Bases Visualizations}
+
+#### Graph Based Visualizations
+
+### Subrules
+### Selecting 20 Rules with the Highest Confidence for each set
+
+  ## Attrition = Yes
+top20.subRulesYes<-head(subsetRulesYes, n = 20, by ="confidence")
+
+  ## Attrition = No
+top20.subRulesNo<-head(subsetRulesNo, n = 20, by ="confidence")
+
+### 20 Rules Plots
+
+  ## Attrition = Yes
+plot(top20.subRulesYes, method = "graph",  engine = "htmlwidget")
+
+  ## Attrition = No
+plot(top20.subRulesNo, method = "graph",  engine = "htmlwidget")
+
+
+### Selecting 10 Rules with the Highest Confidence for each set
+
+  ## Attrition = Yes
+top10.subRulesYes<-head(subsetRulesYes, n = 10, by ="confidence")
+
+  ## Attrition = No
+top10.subRulesNo<-head(subsetRulesNo, n = 10, by ="confidence")
+
+### 10 Rules Plots
+
+  ## Attrition = Yes
+plot(top10.subRulesYes, method = "graph",  engine = "htmlwidget")
+
+  ## Attrition = No
+plot(top10.subRulesNo, method = "graph",  engine = "htmlwidget")
+
+### Selecting 5 Rules with the Highest Confidence for each set
+
+  ## Attrition = Yes
+top5.subRulesYes<-head(subsetRulesYes, n = 5, by ="confidence")
+
+  ## Attrition = No
+top5.subRulesNo<-head(subsetRulesNo, n = 5, by ="confidence")
+
+## 5 Rules Plots
+
+  ## Attrition = Yes
+plot(top5.subRulesYes, method = "graph",  engine = "htmlwidget")
+
+  ## Attrition = No
+plot(top5.subRulesNo, method = "graph",  engine = "htmlwidget")
+```
+Graphs 1 and 2: Rules with high lift have low support
+Graphs 3 and 4: Rules with High confidence and low support have around 7 or 8 items. High support 5 or 6 items 
+
+```{r ARM-Rules Individual Rule Representation}
+
+### Selecting 20 Rules with the Highest Lift
+
+  ## Attrition = Yes
+top20.subRulesYesL<-head(subsetRulesYes, n = 20, by ="lift")
+
+  ## Attrition = No
+top20.subRulesNoL<-head(subsetRulesNo, n = 20, by ="lift")
+
+### 20 Rules Plots
+
+  ## Attrition = Yes
+plot(top20.subRulesYesL, method = "paracoord")
+
+  ## Attrition = No
+plot(top20.subRulesNoL, method = "paracoord")
+```
+
+#### K-means Clustering
+K-means clustering is used to visualize patterns in how the attributes contribute to the creation of groups of employees. 
+```{r Start of kmeans check factors}
+xc <- HR_clean
+x_factors <- Filter(is.factor, xc)
+head(x_factors)
+```
+
+
+```{r factors to numeric}
+## Kmeans needs a matrix/dataframe of all numbers
+# remove employee number and attrition yes/no to start with
+xc <-HR_clean
+xc_att <-HR_clean
+xc_att <- xc[,c(2:32)] # keep a version of the data with attrition so we can compare the impact of attrition on groups
+xc <- xc[,c(2,4:32)]
+xc[] <- lapply(xc, function(x) as.numeric(x))
+head(xc)
+```
+```{r}
+# make all numeric
+xc_att[] <- lapply(xc_att, function(x) as.numeric(x))
+# reorder columns so attrition is last
+xc_att <- xc_att[,c(1, 3:31, 2)]
+head(xc_att)
+```
+
+
+```{r check for blanks}
+# Some parts of kmeans don't work well with NAs, so make sure those are gone
+colSums(is.na(xc))
+```
+
+```{r set up matrix, scaled matrix, transformed matrix}
+## Depending on the data, we may need a scaled or transformed matrix. Make all three so we can visualize them. 
+xc.m <- as.matrix(xc) # m stands for matrix
+xc.sm <-scale(xc.m)   # sm for scaled matrix
+xc.tm <-t(xc.m)       # tm for transformed matrix
+```
+
+
+
+
+```{r heatmap of matrix}
+## visualize matrix
+### result: this matrix isn't useful. It needs to be scaled so that income isn't much higher. 
+heatmap(xc.m)
+```
+
+```{r visulaize transformed matrix}
+## Visualize transformed matrix
+### result: there is a lot of variety in the data, but too many groups to be useful
+heatmap(xc.tm)
+```
+```{r visualize scaled matrix}
+
+#colSums(is.na(xc.sm))
+heatmap(xc.sm)
+```
+
+```{r run kmeans on matrix, scaled, transformed matrix, 4 groups}
+model_xc4m <- kmeans(xc.m, 4)
+model_xc4sm <- kmeans(xc.sm, 4)
+model_xc4tm <- kmeans(xc.tm, 4)
+```
+
+```{r visualize kmeans matrix, 4 groups}
+if("factoextra" %in% rownames(installed.packages()) == FALSE) {install.packages('factoextra') }
+library(factoextra)
+## visualizing kmeans 4 groups with a cluster plot
+### because the numbers aren't scaled, the groups overlap
+fviz_cluster(model_xc4m, data = xc.m,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize cluster plot scaled matrix, 4 groups}
+### scaled matrix has three groups, but two overlap a lot
+fviz_cluster(model_xc4sm, data = xc.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+
+```{r visualize cluster plot, transformed matrix}
+### this isn't useful. Not using transformed matrix going forward. 
+fviz_cluster(model_xc4tm, data = xc.tm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize 6 clusters}
+model_xc6sm <- kmeans(xc.sm, 6)
+fviz_cluster(model_xc6sm, data = xc.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize 3 clusters}
+model_xc3sm <- kmeans(xc.sm, 3)
+fviz_cluster(model_xc3sm, data = xc.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize 2 clusters}
+model_xc2sm <- kmeans(xc.sm, 2)
+fviz_cluster(model_xc2sm, data = xc.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r heatmap of two clusters}
+heatmap(model_xc2sm$centers)
+
+```
+
+```{r heatmap of 2 clusters}
+### this isn't useful because it is too coarse
+centers2 <- t(model_xc2sm$centers)
+heatmap(centers2)
+```
+
+```{r kmeans including attrition}
+## does including attrition change the clusters?
+
+xc_att.sm <-scale(as.matrix(xc_att))
+model_attsm2 <- kmeans(xc_att.sm, 2)
+model_attsm3 <- kmeans(xc_att.sm, 3)
+model_attsm4 <- kmeans(xc_att.sm, 4)
+model_attsm6 <- kmeans(xc_att.sm, 6)
+```
+
+```{r kmeans 2 clusters with attribution}
+# no change at 2 clusters
+fviz_cluster(model_attsm2, data = xc_att.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r kmeans 3 clusters with attribution}
+# with 3 clusters, there is some separation
+fviz_cluster(model_attsm3, data = xc_att.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r kmeans 4 clusters with attribution}
+###  with 4 clusters, there is too much overlap with three clusters
+### but one cluster is still separate
+fviz_cluster(model_attsm4, data = xc_att.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+```{r}
+centers_att3 <- t(model_attsm3$centers)
+heatmap(centers_att3)
+```
+The centers for the 4-cluster model gives a clear heatmap.
+```{r heatmap cluster centers with attribution, fig.height=20}
+### it looks like the cluster that was separate is for people with high job level, education, and business travel.
+### the three overlapping clusters differ in department, worklife balance, and overtime, among others
+### attrition seems high in one department and with worklife balance and training last year
+centers_att4 <- t(model_attsm4$centers)
+heatmap(centers_att4)
+```
+
+```{r looking only at people who left}
+head(xc_att)
+att_YES <- xc_att[which(xc_att$Attrition == 2) , ]
+head(att_YES)
+str(att_YES)
+```
+
+```{r scale and prep for kmeans}
+att_YES.sm <-scale(as.matrix(att_YES[,1:30]))
+head(att_YES.sm)
+```
+```{r run kmeans on people who left}
+model_YES3 <- kmeans(att_YES.sm, 3)
+model_YES4 <- kmeans(att_YES.sm, 4)
+model_YES5 <- kmeans(att_YES.sm, 5)
+model_YES6 <- kmeans(att_YES.sm, 6)
+```
+
+```{r visualize 3 clusters for people who left}
+fviz_cluster(model_YES3, data = att_YES.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+4 clusters appears to be the most useful
+Notice how few people left in the right group (cluster 1)
+```{r visualize 4 clusters for people who left}
+fviz_cluster(model_YES4, data = att_YES.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize 5 clusters for people who left}
+fviz_cluster(model_YES5, data = att_YES.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+```{r visualize centers for 5 k means for people who left}
+centers_yes5 <- t(model_YES5$centers)
+heatmap(centers_yes5)
+```
+Looking at which attributes most distinguish between attrition = YES and attrition = NO. 
+```{r}
+model_attsm4$centers
+```
+```{r}
+diff_att <- data.frame(t(model_attsm4$centers[1:2, ]))
+#rownames(diff_att) <- c("Group1", "Group2")
+#difference.list <- abs(diff(diff_att))
+diff_att$CenterDifference <- round(abs(diff_att$X1 - diff_att$X2),2)
+diff_att
+sorted_diff_att <- diff_att[order(-diff_att$CenterDifference),]
+sorted_diff_att[1:11, ]
+
+```
+```{r}
+plot(sorted_diff_att$CenterDifference)
+```
+
+Looking at the group with the higest attrition and the group with the lowest attrition, the attributes with the biggest difference between those groups are:
+
+* TotalWorkingYears
+* NumCompaniesWorked
+* JobLevel
+* MonthlyIncome
+* Education
+* JobRole
+* MaritalStatus
+* StockOptionLevel
+* JobInvolvement
+
+#### Predictive Models
+Based on the information gained from analyzing the data, we wanted to test the data against 5 different algorithms. The way we're setting up our tests will be to use all parameters and then try a couple other subsets of parameters.
+
+We will be running a few pilot tests on each model and on some of the subsets just to qualify where we should spend our time.
+
+Once we have models and datasets that are bearing fruit, we will then run our full test. We will be using an alternate version of k-folds in which we will:
+
+1. generate 5 samples based on set seeds 
+2. separate the data into 2/3 training and 1/3 testing
+3. train the models based on the 2/3 training subset with the target variable as attrition
+4. test the model against the 1/3 testing subset, removing the attrition label as needed
+5. generate a confusion table for each seed based on the testing's actual attrition
+6. average the accuracy, precision yes, precision no, recall yes, and recall no for each
+
+```{r}
+# Getting Set Up
+HR_tree <- HR_clean
+HR_tree <- HR_tree[,2:length(HR_tree)]
+
+# Dataset 1/3
+# set Seed for randomizer to always pick the same
+seedNum1 <- 23
+seedNum2 <- 465
+seedNum3 <- 1
+seedNum4 <- 987
+seedNum5 <- 307
+
+set.seed(23)
+# Generate random sample of rows
+randIndex1 <- sample(1:nrow(HR_clean))
+# Set 2/3 Cutpoint of total rows
+cutPoint <- floor(nrow(HR_clean)*2/3)
+# Create train data based on the 2/3 value
+trainData1 <- HR_tree[randIndex1[1:cutPoint],]
+# Create test data based on the remaining 1/3
+testData1 <- HR_tree[randIndex1[(cutPoint+1):length(randIndex1)],]
+
+# Dataset 2/3
+set.seed(465)
+# Generate random sample of rows
+randIndex2 <- sample(1:nrow(HR_clean))
+
+# Dataset 2/3
+set.seed(1)
+# Generate random sample of rows
+randIndex3 <- sample(1:nrow(HR_clean))
+```
+
+##### Decision Trees
+Decision Trees is the first model we used. It is a modeling algorithm based applying decision points (nodes) that branch out toward either a computer outcome or toward more nodes for further branching. Decision Trees is a good starting point as it can tell us if a smaller subset of parameters is worth looking at as well as model on the whole parameter list.
+
+To start, we're running a decision tree with cp=0 and the default for minsplit and depth. This will give us a baseline to compare with.
+
+```{r}
+# Function
+# Decision Tree Function: 
+# First variable is putting in the seedNumber. I've set 5 variables labeled as seedNum1 - seedNum5
+# Second variable is whichever dataset that is being generated
+printDecision <- function(seedNum, dataSet, depth=5){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  decisionTree <- rpart(Attrition ~ ., data = train, method="class", control=rpart.control(cp=0, minsplit = 5, maxdepth = depth))
+  summary(decisionTree)
+  # plot number of splits
+  rpart.plot(decisionTree, tweak=1.6)
+  # Predictions
+  predicted <- predict(decisionTree, test, type="class")
+  print(summary(predicted))
+  print(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+  set.seed(NULL)
+}
+```
+
+```{r}
+if("rpart" %in% rownames(installed.packages()) == FALSE) {install.packages('rpart') }
+if("rattle" %in% rownames(installed.packages()) == FALSE) {install.packages('rattle') }
+if("rpart.plot" %in% rownames(installed.packages()) == FALSE) {install.packages('rpart.plot') }
+library(rpart)
+library(rattle)
+library(rpart.plot)
+basicTree <- rpart(Attrition ~ ., data = trainData1, method="class", control=rpart.control(cp=0))
+summary(basicTree)
+
+#predict the test dataset using the model for train tree No. 1
+basicPredict <- predict(basicTree, testData1, type="class")
+#plot number of splits
+summary(basicPredict)
+table(predictedAttrition=basicPredict, actualAttrition=testData1$Attrition)
+#Disputed Prediction
+rpart.plot(basicTree, tweak=1.6)
+```
+
+In looking at the table, we can calculate accuracy:
+395/490 = ~.806
+
+We'll run the model on increase to 10 depth and minsplit 5. Minsplit is that there must be a minimum of 5 results in each separation and depth is how many divisions there are.
+```{r}
+advancedTree <- printDecision(seedNum1, HR_tree, 10)
+```
+
+This tells us that the accuracy is 393/490 = ~.802
+
+We'll run the model on 5 depth now.
+
+```{r}
+# Increase minSplit and maxDepth
+advancedTree <- printDecision(seedNum1, HR_tree)
+```
+
+Accuracy: 406/490 = ~.829
+
+5 depth seems to be doing best.
+
+Based on previous information from KMeans and from Apriori, let's select/remove fields. Selecting:
+
+* Attrition
+* BusinessTravel
+* Department
+* Education
+* JobLevel
+* MaritalStatus
+* MonthlyIncome
+* OverTime 
+* WorkLifeBalance
+* YearsWithCurrManager
+* YearsInCurrentRole
+
+
+```{r}
+treeSpecific <- data.frame(HR_tree$Attrition, HR_tree$BusinessTravel, HR_tree$Department, HR_tree$Education, HR_tree$JobLevel, HR_tree$MaritalStatus, HR_tree$OverTime, HR_tree$WorkLifeBalance, HR_tree$YearsInCurrentRole, HR_tree$YearsWithCurrManager )
+
+# Picking specific attributes based on what the previous analysis
+colnames(treeSpecific) <- c("Attrition","BusinessTravel","Department","Education","JobLevel","MaritalStatus","OverTime","WorkLifeBalance","YearsWithCurrManager","YearsInCurrentRole")
+
+specificTree <- printDecision(seedNum1, treeSpecific)
+```
+
+Predicted Accuracy:
+414/490 = ~ .845
+
+We'll add in income as it was one of the parameters as well, but it needs to be folded into the same discrete form.
+
+```{r}
+# Determining percentiles
+Percentile_00  = min(HR_tree$MonthlyIncome)
+Percentile_33  = quantile(HR_tree$MonthlyIncome, 0.33333)
+Percentile_67  = quantile(HR_tree$MonthlyIncome, 0.66667)
+Percentile_100 = max(HR_tree$MonthlyIncome)
+
+# Values
+HR.Bind = rbind(Percentile_00, Percentile_33, Percentile_67, Percentile_100)
+dimnames(HR.Bind)[[2]] = "Value"
+HR.Bind
+
+# Grouping
+treeIncome <- treeSpecific
+treeIncome$income <- HR_tree$MonthlyIncome
+treeIncome$Group[treeIncome$income >= Percentile_00 & treeIncome$income <  Percentile_33]  = "Low_Income"
+treeIncome$Group[treeIncome$income >= Percentile_33 & treeIncome$income <  Percentile_67]  = "Mid_Income"
+treeIncome$Group[treeIncome$income >= Percentile_67 & treeIncome$income <= Percentile_100] = "High_Income"
+treeIncome$income <- NULL
+
+incomeTree <- printDecision(seedNum1, treeIncome)
+```
+
+410/490 - worse off.
+
+We'll use the specific 10 fields and remove overtime and business travel because they are correlated with worklifebalance.
+
+```{r}
+# Grouping
+reducedFields <- treeSpecific
+reducedFields$Group <- NULL
+reducedFields$OverTime <- NULL
+reducedFields$BusinessTravel<- NULL
+
+printDecision(seedNum1, reducedFields)
+```
+
+409/490
+This winds up being worse.
+
+We will then run our final tests and aggregate them into our results dataframe. This will be depth 5 and on both the full parameter set as well as the specific 10.
+
+```{r}
+confusionTable <- function(seedNum, dataSet){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  decisionTree <- rpart(Attrition ~ ., data = train, method="class", control=rpart.control(cp=0, minsplit = 5, maxdepth = 5))
+  predicted <- predict(decisionTree, test, type="class")
+  set.seed(NULL)
+  return(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+}
+
+tableCalc <- function(table){
+  calcTable <- as.data.frame(table)
+  accuracy <- (calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="Yes"), 3] + calcTable[which(calcTable$predictedAttrition=="No" && calcTable$actualAttrition=="No"), 3])/sum(calcTable$Freq)
+  precisionYes <- (calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="Yes"), 3])/(calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="Yes"),3] + calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="No"),3])
+  precisionNo <- (calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="No"), 3])/(calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="Yes"),3] + calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="No"),3])
+  recallYes <- (calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="Yes"), 3])/(calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="Yes"),3] + calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="Yes"),3])
+  recallNo <- (calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="No"), 3])/(calcTable[which(calcTable$predictedAttrition=="Yes" & calcTable$actualAttrition=="No"),3] + calcTable[which(calcTable$predictedAttrition=="No" & calcTable$actualAttrition=="No"),3])
+  dataFrame <- data.frame(accuracy,precisionYes,precisionNo,recallYes,recallNo)
+  return(dataFrame)
+}
+
+averageTableCalc <- function(dataFrame){
+  avgAccuracy <- mean(dataFrame$accuracy)
+  avgPrecisionYes <- mean(dataFrame$precisionYes)
+  avgPrecisionNo <- mean(dataFrame$precisionNo)
+  avgRecallYes <- mean(dataFrame$recallYes)
+  avgRecallNo <- mean(dataFrame$recallNo)
+  newDF <- data.frame(avgAccuracy, avgPrecisionYes, avgPrecisionNo, avgRecallYes, avgRecallNo)
+  return(newDF)
+}
+
+completeTreeFunc <- function(dataSet){
+  treeTable1 <- confusionTable(seedNum1, dataSet)
+  treeTable2 <- confusionTable(seedNum2, dataSet)
+  treeTable3 <- confusionTable(seedNum3, dataSet)
+  treeTable4 <- confusionTable(seedNum4, dataSet)
+  treeTable5 <- confusionTable(seedNum5, dataSet)
+  
+  treeTableCalc1 <- tableCalc(treeTable1)
+  treeTableCalc2 <- tableCalc(treeTable2)
+  treeTableCalc3 <- tableCalc(treeTable3)
+  treeTableCalc4 <- tableCalc(treeTable4)
+  treeTableCalc5 <- tableCalc(treeTable5)
+  
+  treeTableCalc <- data.frame(rbind(as.matrix(treeTableCalc1),as.matrix(treeTableCalc2),as.matrix(treeTableCalc3),as.matrix(treeTableCalc4),as.matrix(treeTableCalc5)))
+  
+  avgTreeCalc <- averageTableCalc(treeTableCalc)
+  print(avgTreeCalc)
+}
+
+```
+
+```{r}
+hrTree <- completeTreeFunc(HR_tree)
+hrTree$type <- "decisionTrees_hrTree"
+hrTreeSpecific <- completeTreeFunc(treeSpecific)
+hrTreeSpecific$type <- "decisionTrees_treeSpecific"
+hrTreeIncome <- completeTreeFunc(treeIncome)
+hrTreeIncome$type <- "decisionTrees_treeIncome"
+hrTreeReduced <- completeTreeFunc(reducedFields)
+hrTreeReduced$type <- "decisionTrees_treeReduced"
+completeModels <- rbind(hrTree, hrTreeSpecific, hrTreeIncome, hrTreeReduced)
+completeModels
+```
+
+##### Support Vector Machines
+The next one we ran is Support Vector Machines (SVM), a supervised learning model. It looks at the data and decides on how to create a linear plane that would cut across the dimensions and separate betwen classes. There are two parameters we will be adjusting:
+
+1. the kernel, which is how it identifies the type of dimensional perspective 
+2. the cost, which is how it punishes for an incorrect assignment
+
+```{r}
+if("kernlab" %in% rownames(installed.packages()) == FALSE) {install.packages('kernlab') }
+if("e1071" %in% rownames(installed.packages()) == FALSE) {install.packages('e1071') }
+library(kernlab)
+library(e1071)
+
+printSVM <- function(seedNum, dataSet, kernelType="radial", cost=1){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  svmModel <- svm(Attrition ~ ., data = train, kernel=kernelType, cost=cost)
+  # Predictions
+  predicted <- predict(svmModel, test, type="votes")
+  print(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+  set.seed(NULL)
+}
+```
+
+```{r}
+kernelName <- "radial"
+print(kernelName)
+dataFrame <- HR_tree
+printSVM(seedNum1, dataFrame, kernelName, cost=1)
+```
+```{r eval=FALSE}
+printSVM(seedNum1, dataFrame, kernelName, cost=.7)
+printSVM(seedNum1, dataFrame, kernelName, cost=.5)
+printSVM(seedNum1, dataFrame, kernelName, cost=.3)
+printSVM(seedNum1, dataFrame, kernelName, cost=.1)
+printSVM(seedNum2, dataFrame, kernelName, cost=1)
+printSVM(seedNum2, dataFrame, kernelName, cost=.7)
+printSVM(seedNum2, dataFrame, kernelName, cost=.5)
+printSVM(seedNum2, dataFrame, kernelName, cost=.3)
+printSVM(seedNum2, dataFrame, kernelName, cost=.1)
+printSVM(seedNum3, dataFrame, kernelName, cost=1)
+printSVM(seedNum3, dataFrame, kernelName, cost=.7)
+printSVM(seedNum3, dataFrame, kernelName, cost=.5)
+printSVM(seedNum3, dataFrame, kernelName, cost=.3)
+printSVM(seedNum3, dataFrame, kernelName, cost=.1)
+```
+Radial seems to be only guessing no to attrition.
+
+```{r}
+kernelName <- "sigmoid"
+print(kernelName)
+dataFrame <- HR_tree
+printSVM(seedNum1, dataFrame, kernelName, cost=1)
+```
+```{r eval=FALSE}
+printSVM(seedNum1, dataFrame, kernelName, cost=.7)
+printSVM(seedNum1, dataFrame, kernelName, cost=.5)
+printSVM(seedNum1, dataFrame, kernelName, cost=.3)
+printSVM(seedNum1, dataFrame, kernelName, cost=.1)
+printSVM(seedNum2, dataFrame, kernelName, cost=1)
+printSVM(seedNum2, dataFrame, kernelName, cost=.7)
+printSVM(seedNum2, dataFrame, kernelName, cost=.5)
+printSVM(seedNum2, dataFrame, kernelName, cost=.3)
+printSVM(seedNum2, dataFrame, kernelName, cost=.1)
+printSVM(seedNum3, dataFrame, kernelName, cost=1)
+printSVM(seedNum3, dataFrame, kernelName, cost=.7)
+printSVM(seedNum3, dataFrame, kernelName, cost=.5)
+printSVM(seedNum3, dataFrame, kernelName, cost=.3)
+printSVM(seedNum3, dataFrame, kernelName, cost=.1)
+```
+Sigmoid seems to be only guessing no to attrition.
+
+```{r}
+kernelName <- "polynomial"
+print(kernelName)
+dataFrame <- HR_tree
+printSVM(seedNum1, dataFrame, kernelName, cost=1)
+```
+```{r eval=FALSE}
+printSVM(seedNum1, dataFrame, kernelName, cost=.7)
+printSVM(seedNum1, dataFrame, kernelName, cost=.5)
+printSVM(seedNum1, dataFrame, kernelName, cost=.3)
+printSVM(seedNum1, dataFrame, kernelName, cost=.1)
+printSVM(seedNum2, dataFrame, kernelName, cost=1)
+printSVM(seedNum2, dataFrame, kernelName, cost=.7)
+printSVM(seedNum2, dataFrame, kernelName, cost=.5)
+printSVM(seedNum2, dataFrame, kernelName, cost=.3)
+printSVM(seedNum2, dataFrame, kernelName, cost=.1)
+printSVM(seedNum3, dataFrame, kernelName, cost=1)
+printSVM(seedNum3, dataFrame, kernelName, cost=.7)
+printSVM(seedNum3, dataFrame, kernelName, cost=.5)
+printSVM(seedNum3, dataFrame, kernelName, cost=.3)
+printSVM(seedNum3, dataFrame, kernelName, cost=.1)
+```
+Polynomial seems to be only guessing no to attrition.
+
+```{r}
+kernelName <- "linear"
+print(kernelName)
+dataFrame <- HR_tree
+printSVM(seedNum1, dataFrame, kernelName, cost=1)
+printSVM(seedNum1, dataFrame, kernelName, cost=.7)
+printSVM(seedNum1, dataFrame, kernelName, cost=.5)
+printSVM(seedNum1, dataFrame, kernelName, cost=.3)
+printSVM(seedNum1, dataFrame, kernelName, cost=.1)
+printSVM(seedNum2, dataFrame, kernelName, cost=1)
+printSVM(seedNum2, dataFrame, kernelName, cost=.7)
+printSVM(seedNum2, dataFrame, kernelName, cost=.5)
+printSVM(seedNum2, dataFrame, kernelName, cost=.3)
+printSVM(seedNum2, dataFrame, kernelName, cost=.1)
+printSVM(seedNum3, dataFrame, kernelName, cost=1)
+printSVM(seedNum3, dataFrame, kernelName, cost=.7)
+printSVM(seedNum3, dataFrame, kernelName, cost=.5)
+printSVM(seedNum3, dataFrame, kernelName, cost=.3)
+printSVM(seedNum3, dataFrame, kernelName, cost=.1)
+```
+Linear is providing some information. We'll leave cost at .5 as there seems to be quite a variance across the costs and the seedNum. 
+
+```{r}
+kernelName <- "linear"
+print(kernelName)
+print("treeSpecific")
+dataFrame <- treeSpecific
+printSVM(seedNum1, dataFrame, kernelName, cost=1)
+```
+```{r eval=FALSE}
+printSVM(seedNum1, dataFrame, kernelName, cost=.7)
+printSVM(seedNum1, dataFrame, kernelName, cost=.5)
+printSVM(seedNum1, dataFrame, kernelName, cost=.3)
+printSVM(seedNum1, dataFrame, kernelName, cost=.1)
+printSVM(seedNum2, dataFrame, kernelName, cost=1)
+printSVM(seedNum2, dataFrame, kernelName, cost=.7)
+printSVM(seedNum2, dataFrame, kernelName, cost=.5)
+printSVM(seedNum2, dataFrame, kernelName, cost=.3)
+printSVM(seedNum2, dataFrame, kernelName, cost=.1)
+printSVM(seedNum3, dataFrame, kernelName, cost=1)
+printSVM(seedNum3, dataFrame, kernelName, cost=.7)
+printSVM(seedNum3, dataFrame, kernelName, cost=.5)
+printSVM(seedNum3, dataFrame, kernelName, cost=.3)
+printSVM(seedNum3, dataFrame, kernelName, cost=.1)
+```
+Using the specific 10 parameters, it also starts guessing no only.
+
+We will then use linear across all parameters at .5 cost and add the average of the 5 seeds to our final dataframe.
+
+```{r}
+confusionTableSVM <- function(seedNum, dataSet){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  algorithm <- svm(Attrition ~ ., data = train, kernel="linear", cost=.5)
+  predicted <- predict(algorithm, test, type="class")
+  set.seed(NULL)
+  return(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+}
+
+
+completeSVMFunc <- function(dataSet){
+  table1 <- confusionTableSVM(seedNum1, dataSet)
+  table2 <- confusionTableSVM(seedNum2, dataSet)
+  table3 <- confusionTableSVM(seedNum3, dataSet)
+  table4 <- confusionTableSVM(seedNum4, dataSet)
+  table5 <- confusionTableSVM(seedNum5, dataSet)
+  
+  tableCalc1 <- tableCalc(table1)
+  tableCalc2 <- tableCalc(table2)
+  tableCalc3 <- tableCalc(table3)
+  tableCalc4 <- tableCalc(table4)
+  tableCalc5 <- tableCalc(table5)
+  
+  tableCalc <- data.frame(rbind(as.matrix(tableCalc1),as.matrix(tableCalc2),as.matrix(tableCalc3),as.matrix(tableCalc4),as.matrix(tableCalc5)))
+  
+  avgTableCalc <- averageTableCalc(tableCalc)
+  print(avgTableCalc)
+}
+```
+
+```{r}
+hrSVM <- completeSVMFunc(HR_tree)
+hrSVM$type <- "svm_hrTree"
+completeModels <- rbind(completeModels, hrSVM)
+completeModels
+```
+
+##### Naive Bayes
+Our next algorithm is Naive Bayes: a machine learning classifier that's based on Bayes theorem of dependent probability. It's Naive however because it assumes independence between the variables, meaning that they are not probabilistically linked. For our system, that would mean that one pixel is not intrinsically linked to another pixel.
+
+We will be running it with changing the laplace number to see if it improves.
+```{r}
+#
+printNB <- function(seedNum, dataSet, laplaceNum=1){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  model=naiveBayes(Attrition~., data = train, laplace = laplaceNum, na.action = na.pass)
+  # Predictions
+  predicted <- predict(model, test)
+  print(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+  set.seed(NULL)
+}
+```
+
+```{r}
+printNB(seedNum1, HR_tree)
+printNB(seedNum1, HR_tree, 2)
+printNB(seedNum1, HR_tree, 5)
+printNB(seedNum1, HR_tree, 10)
+printNB(seedNum1, HR_tree, 15)
+```
+More seeds were tested, but not much difference in them.
+```{r eval=FALSE}
+printNB(seedNum2, HR_tree)
+printNB(seedNum2, HR_tree, 2)
+printNB(seedNum2, HR_tree, 5)
+printNB(seedNum2, HR_tree, 10)
+printNB(seedNum2, HR_tree, 15)
+printNB(seedNum3, HR_tree)
+printNB(seedNum3, HR_tree, 2)
+printNB(seedNum3, HR_tree, 5)
+printNB(seedNum3, HR_tree, 10)
+printNB(seedNum3, HR_tree, 15)
+```
+
+```{r}
+printNB(seedNum1, treeSpecific)
+printNB(seedNum1, treeSpecific, 2)
+printNB(seedNum1, treeSpecific, 5)
+printNB(seedNum1, treeSpecific, 10)
+printNB(seedNum1, treeSpecific, 15)
+```
+More seeds were tested, but not much difference in them.
+```{r eval=FALSE}
+printNB(seedNum2, treeSpecific)
+printNB(seedNum2, treeSpecific, 2)
+printNB(seedNum2, treeSpecific, 5)
+printNB(seedNum2, treeSpecific, 10)
+printNB(seedNum2, treeSpecific, 15)
+printNB(seedNum3, treeSpecific)
+printNB(seedNum3, treeSpecific, 2)
+printNB(seedNum3, treeSpecific, 5)
+printNB(seedNum3, treeSpecific, 10)
+printNB(seedNum3, treeSpecific, 15)
+```
+Both datasets seem like potentials so we will add both, but increasing Laplace does not make a tremendous jump until 15. But that also causes overfitting, so we will leave at laplace 1.
+```{r}
+confusionTableNB <- function(seedNum, dataSet, laplaceNum=1){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  algorithm <- naiveBayes(Attrition~., data = train, laplace = laplaceNum, na.action = na.pass)
+  predicted <- predict(algorithm, test, type="class")
+  set.seed(NULL)
+  return(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+}
+
+
+completeNBFunc <- function(dataSet, laplaceNum=1){
+  table1 <- confusionTableNB(seedNum1, dataSet, laplaceNum)
+  table2 <- confusionTableNB(seedNum2, dataSet, laplaceNum)
+  table3 <- confusionTableNB(seedNum3, dataSet, laplaceNum)
+  table4 <- confusionTableNB(seedNum4, dataSet, laplaceNum)
+  table5 <- confusionTableNB(seedNum5, dataSet, laplaceNum)
+  
+  tableCalc1 <- tableCalc(table1)
+  tableCalc2 <- tableCalc(table2)
+  tableCalc3 <- tableCalc(table3)
+  tableCalc4 <- tableCalc(table4)
+  tableCalc5 <- tableCalc(table5)
+  
+  tableCalc <- data.frame(rbind(as.matrix(tableCalc1),as.matrix(tableCalc2),as.matrix(tableCalc3),as.matrix(tableCalc4),as.matrix(tableCalc5)))
+  
+  avgTableCalc <- averageTableCalc(tableCalc)
+  print(avgTableCalc)
+}
+```
+
+```{r}
+nbModel <- completeNBFunc(HR_tree, 1)
+nbModel$type <- "nb_hrTree"
+completeModels <- rbind(completeModels, nbModel)
+nb2Model <- completeNBFunc(treeSpecific, 1)
+nb2Model$type <- "nb_treeSpecific"
+completeModels <- rbind(completeModels, nb2Model)
+completeModels
+```
+
+##### Random Forest
+Our next algorithm is Random Forest: an ensemble learning algorithm that produces multiple trees and outputs the class that is the most often selected class. We will be increasing trees from 3 to 25. As the more trees we add in, the more overfitting may occur.
+```{r}
+if("randomForest" %in% rownames(installed.packages()) == FALSE) {install.packages('randomForest') }
+library(randomForest)
+printRF <- function(seedNum, dataSet, trees=3){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  model=randomForest(Attrition~., data = train, ntree=trees)
+  # Predictions
+  predicted <- predict(model, test, type=c("class"))
+  print(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+  set.seed(NULL)
+}
+```
+
+```{r}
+printRF(seedNum1, HR_tree)
+printRF(seedNum1, HR_tree, 5)
+printRF(seedNum1, HR_tree, 10)
+printRF(seedNum1, HR_tree, 15)
+printRF(seedNum1, HR_tree, 25)
+```
+More seeds were tested, but not much difference in them.
+```{r eval=FALSE}
+printRF(seedNum2, HR_tree)
+printRF(seedNum2, HR_tree, 5)
+printRF(seedNum2, HR_tree, 10)
+printRF(seedNum2, HR_tree, 15)
+printRF(seedNum2, HR_tree, 25)
+printRF(seedNum3, HR_tree)
+printRF(seedNum3, HR_tree, 5)
+printRF(seedNum3, HR_tree, 10)
+printRF(seedNum3, HR_tree, 15)
+printRF(seedNum3, HR_tree, 25)
+```
+
+```{r}
+printRF(seedNum1, treeSpecific)
+printRF(seedNum1, treeSpecific, 5)
+printRF(seedNum1, treeSpecific, 10)
+printRF(seedNum1, treeSpecific, 15)
+printRF(seedNum1, treeSpecific, 25)
+```
+More seeds were tested, but not much difference in them.
+```{r eval=FALSE}
+printRF(seedNum2, treeSpecific)
+printRF(seedNum2, treeSpecific, 5)
+printRF(seedNum2, treeSpecific, 10)
+printRF(seedNum2, treeSpecific, 15)
+printRF(seedNum2, treeSpecific, 25)
+printRF(seedNum3, treeSpecific)
+printRF(seedNum3, treeSpecific, 5)
+printRF(seedNum3, treeSpecific, 10)
+printRF(seedNum3, treeSpecific, 15)
+printRF(seedNum3, treeSpecific, 25)
+```
+
+What we do see is that as we increase the trees, it does not necessarily perform much better past 10; however, there is definitely the fear of overfitting. We will be adding in 3 and 10 tree variations of the two datasets into our final dataframe.
+```{r}
+confusionTableRF <- function(seedNum, dataSet, ntrees=3){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  train <- dataSet[randIndex[1:cutPoint],]
+  test <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  algorithm <- randomForest(Attrition~., data = train, ntree=ntrees)
+  print("importance")
+  print(importance(algorithm))
+  predicted <- predict(algorithm, test, type="class")
+  set.seed(NULL)
+  return(table(predictedAttrition=predicted, actualAttrition=test$Attrition))
+}
+
+
+completeRFFunc <- function(dataSet, ntrees=3){
+  table1 <- confusionTableRF(seedNum1, dataSet, ntrees)
+  table2 <- confusionTableRF(seedNum2, dataSet, ntrees)
+  table3 <- confusionTableRF(seedNum3, dataSet, ntrees)
+  table4 <- confusionTableRF(seedNum4, dataSet, ntrees)
+  table5 <- confusionTableRF(seedNum5, dataSet, ntrees)
+  
+  tableCalc1 <- tableCalc(table1)
+  tableCalc2 <- tableCalc(table2)
+  tableCalc3 <- tableCalc(table3)
+  tableCalc4 <- tableCalc(table4)
+  tableCalc5 <- tableCalc(table5)
+  
+  tableCalc <- data.frame(rbind(as.matrix(tableCalc1),as.matrix(tableCalc2),as.matrix(tableCalc3),as.matrix(tableCalc4),as.matrix(tableCalc5)))
+  
+  avgTableCalc <- averageTableCalc(tableCalc)
+  print(avgTableCalc)
+}
+```
+
+```{r}
+rfHRTree <- completeRFFunc(HR_tree, 3)
+rfHRTree$type <- "rf_hrTree_3trees"
+rfTreeSpecific <- completeRFFunc(treeSpecific, 3)
+rfTreeSpecific$type <- "rf_treeSpecific_3trees"
+rfHRTree10 <- completeRFFunc(HR_tree, 10)
+rfHRTree10$type <- "rf_hrTree_10trees"
+rfTreeSpecific10 <- completeRFFunc(treeSpecific, 10)
+rfTreeSpecific10$type <- "rf_treeSpecific_10trees"
+completeModels <- rbind(completeModels, rfHRTree, rfHRTree10, rfTreeSpecific, rfTreeSpecific10)
+```
+
+##### KNN
+Our last algorithm is K Nearest Neighbor: is a pattern recognition algorithm that trains based on information from the nearest examples. It keeps its training data at all times to use, and thus is fairly computationally heavy.
+```{r}
+if("class" %in% rownames(installed.packages()) == FALSE) {install.packages('class') }
+library(class)
+#convert to numeric
+HR_factor <- HR_tree
+HR_factor$Attrition <-as.numeric(HR_factor$Attrition)
+HR_factor$BusinessTravel <- as.numeric(HR_factor$BusinessTravel)
+HR_factor$Department <- as.numeric(HR_factor$Department)
+HR_factor$Education <- as.numeric(HR_factor$Education)
+HR_factor$EducationField <- as.numeric(HR_factor$EducationField)
+HR_factor$EnvironmentSatisfaction <- as.numeric(HR_factor$EnvironmentSatisfaction)
+HR_factor$Gender <- as.numeric(HR_factor$Gender)
+HR_factor$JobInvolvement <- as.numeric(HR_factor$JobInvolvement)
+HR_factor$JobLevel <- as.numeric(HR_factor$JobLevel)
+HR_factor$JobRole <- as.numeric(HR_factor$JobRole)
+HR_factor$JobSatisfaction <- as.numeric(HR_factor$JobSatisfaction)
+HR_factor$MaritalStatus <- as.numeric(HR_factor$MaritalStatus)
+HR_factor$OverTime <- as.numeric(HR_factor$OverTime)
+HR_factor$PerformanceRating <- as.numeric(HR_factor$PerformanceRating)
+HR_factor$RelationshipSatisfaction <- as.numeric(HR_factor$RelationshipSatisfaction)
+HR_factor$StockOptionLevel <- as.numeric(HR_factor$StockOptionLevel)
+HR_factor$WorkLifeBalance <- as.numeric(HR_factor$WorkLifeBalance)
+
+printNN <- function(seedNum, dataSet, kGuess=3){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  cutPoint <- floor(nrow(dataSet)*2/3)
+  newTrain <- dataSet[randIndex[1:cutPoint],]
+  newTest <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  testNoLabel <- newTest
+  testNoLabel$Attrion <- NULL
+  
+  predicted <- knn(train=newTrain, test=testNoLabel, cl=newTrain$Attrition, k=kGuess, prob=FALSE)
+  print(table(predictedAttrition=predicted, actualAttrition=newTest$Attrition))
+  set.seed(NULL)
+}
+```
+
+```{r}
+printNN(seedNum1, HR_factor, 3)
+printNN(seedNum1, HR_factor, 5)
+printNN(seedNum2, HR_factor, 3)
+printNN(seedNum2, HR_factor, 5)
+printNN(seedNum3, HR_factor, 3)
+printNN(seedNum3, HR_factor, 5)
+```
+We can see that on the full dataset, its performance is fairly poor outside of accuracy. It predicts yes to attrition fairly rarely but not with high recall or precision.
+```{r}
+factorSpecific <- data.frame("Attrition"=HR_factor$Attrition, "BusinessTravel"=HR_factor$BusinessTravel, "Department"=HR_factor$Department, "Education"=HR_factor$Education, "JobLevel"=HR_factor$JobLevel, "MaritalStatus"=HR_factor$MaritalStatus, "Overtime"=HR_factor$OverTime, "WorkLifeBalance"=HR_factor$WorkLifeBalance, "YearsInCurrentRole"=HR_factor$YearsInCurrentRole, "YearsWithCurrManager"=HR_factor$YearsWithCurrManager )
+printNN(seedNum1, factorSpecific, 3)
+printNN(seedNum1, factorSpecific, 5)
+printNN(seedNum2, factorSpecific, 3)
+printNN(seedNum2, factorSpecific, 5)
+printNN(seedNum3, factorSpecific, 3)
+printNN(seedNum3, factorSpecific, 5)
+```
+With the specific 10, it's accuracy is fairly high on accuracy and exceptional on yes recall. We will add the specific 10 values with both 3 and 10 nearest neighbors into our final dataframe.
+
+```{r}
+confusionTableNN <- function(seedNum, dataSet, kGuess=3){
+  # set seed
+  set.seed(seedNum)
+  # Generate random sample of rows
+  randIndex <- sample(1:nrow(dataSet))
+  newTrain <- dataSet[randIndex[1:cutPoint],]
+  newTest <- dataSet[randIndex[(cutPoint+1):length(randIndex)],]
+  testNoLabel <- newTest
+  testNoLabel$Attrion <- NULL
+  
+  predicted <- knn(train=newTrain, test=testNoLabel, cl=newTrain$Attrition, k=kGuess, prob=FALSE)
+  set.seed(NULL)
+  return(table(predictedAttrition=predicted, actualAttrition=newTest$Attrition))
+}
+
+tableCalc2 <- function(newTable){
+  calcTable <- as.data.frame(as.matrix.data.frame(newTable))
+  accurateNumbers <- 0
+  totalNumbers <- 0
+  precision <- data.frame()
+  recall <- data.frame()
+  for(i in 1:length(calcTable)){
+    columnSum <- sum(calcTable[,i])
+    rowSum <- sum(calcTable[i,])
+    cell <- calcTable[i,i]
+    accurateNumbers <- accurateNumbers + cell
+    totalNumbers <- totalNumbers + columnSum
+    precision[1,i] <- cell / columnSum
+    recall[1,i] <- cell / rowSum
+  }
+  dataFrame <- data.frame("precisionNo"=precision[1,1], "precisionYes"=precision[1,2], "recallNo"=recall[1,1],"recallYes"=recall[1,2], "accuracy"=accurateNumbers/totalNumbers)
+}
+
+averageTableCalc2 <- function(dataFrame){
+  avgAccuracy <- mean(dataFrame$accuracy)
+  avgPrecisionYes <- mean(dataFrame$precisionYes)
+  avgPrecisionNo <- mean(dataFrame$precisionNo)
+  avgRecallYes <- mean(dataFrame$recallYes)
+  avgRecallNo <- mean(dataFrame$recallNo)
+  newDF <- data.frame(avgAccuracy, avgPrecisionYes, avgPrecisionNo, avgRecallYes, avgRecallNo)
+  return(newDF)
+}
+
+
+completeNNFunc <- function(dataSet, kGuess=3){
+  table1 <- confusionTableNN(seedNum1, dataSet, kGuess)
+  table2 <- confusionTableNN(seedNum2, dataSet, kGuess)
+  table3 <- confusionTableNN(seedNum3, dataSet, kGuess)
+  table4 <- confusionTableNN(seedNum4, dataSet, kGuess)
+  table5 <- confusionTableNN(seedNum5, dataSet, kGuess)
+  
+  tableCalc1 <- tableCalc2(table1)
+  tableCalc2 <- tableCalc2(table2)
+  tableCalc3 <- tableCalc2(table3)
+  tableCalc4 <- tableCalc2(table4)
+  tableCalc5 <- tableCalc2(table5)
+  
+  tableCalc <- data.frame(rbind(as.matrix(tableCalc1),as.matrix(tableCalc2),as.matrix(tableCalc3),as.matrix(tableCalc4),as.matrix(tableCalc5)))
+  
+  avgTableCalc <- averageTableCalc2(tableCalc)
+  print(avgTableCalc)
+}
+```
+
+```{r}
+nn3 <- completeNNFunc(factorSpecific, 3)
+nn3$type <- "nn_treeSpecific_3"
+nn10 <- completeNNFunc(factorSpecific, 10)
+nn10$type <- "nn_treeSpecific_10"
+completeModels <- rbind(completeModels, nn3, nn10)
+completeModels
+```
+
+```{r}
+completeModels <- subset(completeModels, select=c(6,1:5))
+```
+```{r}
+formattable(completeModels, align = c("l",rep("r", NCOL("type") - 1)), list(
+    `type` = formatter("span", style = ~ style(color = "#000000",font.weight = "bold")), 
+     area(col = 2:6) ~ color_tile("#ff0000", "#71CA97")))
+```
+
+
+## Results
+<general>
+
+###Exploratory Data Analysis & Visualization
+
+Exploratory Data Analysis and Visualization showed that there was not strong association between any one attribute and attrition. The Goodman and Kruskal Tau measure model was used to establish association of categorical values. To make these associations easier to visualize, we grouped the attributes in 3 groups:
+
+Person/Profile
+Company
+Role/Job
+
+and compared them to Attrition.
+
+Each group showed low association to attrition.
+
+```{r resultsEDA1}
+GKmatrix1<- GKtauDataframe(Frame1)
+plot(GKmatrix1, corrColors = "red")
+
+GKmatrix1<- GKtauDataframe(Frame2)
+plot(GKmatrix1, corrColors = "navyblue")
+
+GKmatrix1<- GKtauDataframe(Frame3)
+plot(GKmatrix1, corrColors = "darkgreen")
+
+```
+Attributes were correlated to each other, and we can see pockets of correlation between attributes. We can use this information to simplify models in later stages.
+
+!Use graphic from slide 7!
+```{r ResultsEDA2}
+plot_correlation(HR_eda, type = 'continuous')
+
+```
+What was interesting and unexpected was that the attribute to attribute correlation chart showed actionable information that could be used for simplifying models while the direct correlation chart was relatively inconclusive.
+
+Additionally, each attribute was correlated to attrition individually. The findings confirmed that there was any singular or group of attributes that could be strongly correlated to attrition and further work with more advanced techniques should be used to identify important attributes.
+
+
+### Association Rule Mining
+```{r Frequency}
+# Item Frequency Plot Top 5 Absolute
+itemFrequencyPlot(HR_Trans,support = 0.2, cex.names=0.8, topN=5, col=brewer.pal(8,'RdBu'), type="absolute", main="Absolute Top 20 Items Frequency Plot",horiz=TRUE)
+```
+Conversion of the data to transacions allowed for an initial assessment of the most frequent responses. Attrition, the attribute of interest in this study had 83.9% "No" responses (1233 out of the 1470 transactions), followed by Overtime with 71.7% "No" responses and Business Travel with 70.9% "Travel Rarely" responses. Considering other data analytics  indicated Frequent business travel and overtime as a driver for attrition, knowing that only 30% or less of the respondants had those responses is key information when it comes to deciding what type of startegies to implement and who shoudld be the target audience.
+
+```{r Rules, echo=FALSE}
+### 10 Rules Plots
+
+  ## Attrition = Yes
+plot(top10.subRulesYes, method = "graph",  engine = "htmlwidget")
+
+  ## Attrition = No
+plot(top10.subRulesNo, method = "graph",  engine = "htmlwidget")
+```
+
+By fixing the RHS to Attrition = Yes and Attrition = No rules provide more insight.
+
+With Attrition = Yes, the most frequent factors in the top 20 rules are:
+* Marital Status = Single. In 13 out of the 20 rules
+* Overtime = Yes. In 18 out of the 20 rules
+* Years with current Manager = 0. In 16 out of the 20 rules
+* Years in current Role = 0. In 12 out of the 20 rules
+* Low Income. In 10 out of the 20 rules
+
+With Attrition = No, the most frequent factors in the top 20 rules are:
+* Department=Research & Development. In 10 out of the 20 rules                                                      
+* OverTime=No. In 15 out of the 20 rules                                                                            
+* StockOptionLevel=1. In 6 out of the 20 rules                                                                     
+* WorkLifeBalance=3. In 11 out of the 20 rules       
+```{r Association Rules, echo=FALSE}
+### Selecting 20 Rules with the Highest Confidence for each set
+
+  ## Attrition = Yes
+top20.subRulesYes<-head(subsetRulesYes, n = 20, by ="confidence")
+
+  ## Attrition = No
+top20.subRulesNo<-head(subsetRulesNo, n = 20, by ="confidence")
+
+### 20 Rules Plots
+
+  ## Attrition = Yes
+plot(top20.subRulesYes, method = "graph",  engine = "htmlwidget")
+
+  ## Attrition = No
+plot(top20.subRulesNo, method = "graph",  engine = "htmlwidget")
+
+```
+### K-means Clustering
+K-means was run with k=2, 3, 4, 5, and 6 clusters, both with and without the attribution attribute. The most interesting cluster was k=4, scaled data, with attribution included. This shows one group that separates clearly, and three that overlap. 
+```{r 4 clusters with attribution}
+###  with 4 clusters, there is too much overlap with three clusters
+### but one cluster is still separate
+fviz_cluster(model_attsm4, data = xc_att.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+When looking at only the people who left (attrition = yes), notice how few people left in the right group (cluster 1).
+```{r 4 for left}
+fviz_cluster(model_YES4, data = att_YES.sm,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+The 4-cluster version shows clear separation on several attributes between the group with the highest attrition and the one with the lowest attrition.
+```{r 4 with att, fig.height=25, echo=FALSE}
+### it looks like the cluster that was separate is for people with high job level, education, and business travel.
+### the three overlapping clusters differ in department, worklife balance, and overtime, among others
+### attrition seems high in one department and with worklife balance and training last year
+centers_att4 <- t(model_attsm4$centers)
+heatmap(centers_att4, Colv=NA, Rowv=NA)
+```
+
+```{r}
+plot(sorted_diff_att$CenterDifference)
+```
+The ten most influential attributes were:
+
+```{r}
+sorted_diff_att[1:11, ]
+```
+
+
+### Predictive Models
+```{r}
+formattable(completeModels, align = c("l",rep("r", NCOL("type") - 1)), list(
+    `type` = formatter("span", style = ~ style(color = "#000000",font.weight = "bold")), 
+     area(col = 2:6) ~ color_tile("#ff0000", "#71CA97")))
+```
+
+When looking at the complete table, we do need to define what is our success criteria for defining how well a model performs.
+
+We can look at accuracy, precisionYes, precisionNo, recallYes, and recallNo and decide across a combination of metrics to best define what makes the most sense.
+
+Because we ultimately want to maximize employees who are likely to leave, we should weight Yes.
+
+When we look at recallYes, which provides us with insight on the percentage of correctly classified relevant results, K Nearest Neighbors immediately handles best followed by Naive Bayes.
+
+The best Accuracy is KNN followed by SVM. 
+
+The best on precisionYes is SVM followed by RF with 10 trees on the complete dataset.
+
+Each of these has its cons. KNN has fairly low precision on Yes meaning that only when it's certain, will it make a move. And that certainty is between 30-47% of the of time. But when it does count, the data is indredibly accurate.
+
+SVM was high on PrecisionYes but medium on Recall. That means that it modeled more employees as being likely to leave, but of those, only 49% were truly likely to leave.
+
+Ultimately, this is a question of is it better to classify someone as leaving when they're staying or to classify someone as staying when they're leaving?
+
+KNN, SVM, and Naive Bayes all give some distinct information. However, Random Forest can do fairly well and provides a lot of output that we can follow clearly.
+
+## Conclusions
+
+
+### Next steps in analysis
+Analysis is best done iteratively. To further improve on the models, it is recommended that future analysis include these steps. 
+
+*Gather more data* 
+* More data leads to better results. It would be better to have several thousand observations. 
+* Collect more attributes. Research has shown that some other factors that weren't studied here can impact attrition, including onboarding experience and the networking of employees. 
+* Get a balanced sample. Some models work better when the "yes" and "no" classes have similar numbers of observations. 
+* Compare the models’ predictions with actual attrition to see what parameters they may have chosen to be groups.
+
+*Focus on the most successful models* 
+All models had some good qualities. We recommend continuing with:
+
+* KNN (very accurate at identifying who will quit but not as useful for large data, and may need to have cutoffs based on timeframes)
+* SVM (very little processing work, scales well but doesn't really provide insight into what business variables to improve)
+* Random forest (good at handling a variety of attributes, provides attributes, but is less accurate)
+* Naive Bayes (all rounder, but doesn't excel at anything in particular)
+
+*Run the models on the new data every quarter*
+
+* This helps to identify if there are changes at the company, and whether new programs to influence attrition are working. 
+
+
+### Business decisions
+In addition to using the models to predict if an individual employee is going to leave, the models also identified common contributions to attrition. The HR department can develop programs to target these factors. 
+
+Of the attributes that the models chose as influential, the most common were:
+
+* Overtime (in 5 models)
+* Environmental satisfaction (4)
+* Job level (4)
+* Marital status (4)
+* Monthly income (4)
+* Work-life balance (4)
+
+The company cannot impact marital status, and it is illegal to hire based on that attribute. However, the company can influence the others. For example, it could reduce overtime...or pay people who work overtime more money. There are lots of possible ways of addressing these issues, and the HR department should look further at things like environmental satisfaction and work-life balance by interviewing at-risk employees. 
+
+## References
+[1] 
+“Why People Quit Their Jobs.” Harvard Business Review, Sept. 2016, hbr.org/2016/09/why-people-quit-their-jobs. Accessed 10 Mar. 2020.
+
+ [2]
+“Why People Quit Their Jobs.” Harvard Business Review, Sept. 2016, hbr.org/2016/09/why-people-quit-their-jobs. Accessed 10 Mar. 2020.
+
+ [3] 
+“How to Predict Turnover on Your Sales Team.” Harvard Business Review, July 2017, hbr.org/2017/07/how-to-predict-turnover-on-your-sales-team. Accessed 10 Mar. 2020.
+
+ [4] 
+“How to Predict Turnover on Your Sales Team.” Harvard Business Review, July 2017, hbr.org/2017/07/how-to-predict-turnover-on-your-sales-team. Accessed 10 Mar. 2020.
+
+ [5]
+“To Retain New Hires, Make Sure You Meet with Them in Their First Week.” Harvard Business Review, 14 June 2018, hbr.org/2018/06/to-retain-new-hires-make-sure-you-meet-with-them-in-their-first-week. Accessed 10 Mar. 2020.
+
+[6]
+“How to Predict Turnover on Your Sales Team.” Harvard Business Review, July 2017, hbr.org/2017/07/how-to-predict-turnover-on-your-sales-team. Accessed 10 Mar. 2020.
+
+[7]
+“8 Things Leaders Do That Make Employees Quit.” Harvard Business Review, 10 Sept. 2019, hbr.org/2019/09/8-things-leaders-do-that-make-employees-quit. Accessed 10 Mar. 2020.
+
+[8]
+“Work Institute Releases National Employee Retention Report.” Businesswire.Com, May 2018, www.businesswire.com/news/home/20180501006594/en/Work-Institute-Releases-National-Employee-Retention-Report. Accessed 10 Mar. 2020.
+
+ [9]
+“How to Predict Turnover on Your Sales Team.” Harvard Business Review, July 2017, hbr.org/2017/07/how-to-predict-turnover-on-your-sales-team. Accessed 10 Mar. 2020.
+
+[10]
+Maurer, Roy. “Onboarding Key to Retaining, Engaging Talent.” SHRM, SHRM, 16 Apr. 2015, www.shrm.org/ResourcesAndTools/hr-topics/talent-acquisition/Pages/Onboarding-Key-Retaining-Engaging-Talent.aspx. Accessed 10 Mar. 2020.
+
+[11]
+“The Battle Against Executive Attrition.” Harvard Business Review, 17 July 2008, hbr.org/2008/07/the-battle-against-executive-a. Accessed 10 Mar. 2020.
+
+ [12]
+Dowsett, C. (2018, April). It’s Time to Talk About Organizational Bias in Data Use. Medium; Towards Data Science. 
+
+
